@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "herb": {
+      "type": "http",
+      "url": "https://herb.grosst.cc/mcp"
+    }
+  }
+}

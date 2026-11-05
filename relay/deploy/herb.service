@@ -1,0 +1,21 @@
+[Unit]
+Description=Herb relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=herb
+Group=herb
+WorkingDirectory=/opt/herb
+EnvironmentFile=/etc/herb.env
+ExecStart=/usr/local/bin/herb-bun run src/index.ts
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/herb
+
+[Install]
+WantedBy=multi-user.target

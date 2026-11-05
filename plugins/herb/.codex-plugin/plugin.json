@@ -1,0 +1,12 @@
+{
+  "name": "herb",
+  "version": "0.1.0",
+  "description": "Звонки владельцу на iPhone через приложение Herb.",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Herb",
+    "shortDescription": "Звонки на iPhone",
+    "defaultPrompt": ["Позвони мне и скажи, что сборка закончилась."]
+  }
+}

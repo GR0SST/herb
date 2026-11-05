@@ -1,0 +1,11 @@
+{
+  "name": "herb",
+  "owner": { "name": "GROSST" },
+  "plugins": [
+    {
+      "name": "herb",
+      "source": "./plugins/herb",
+      "description": "Звонки владельцу на iPhone через приложение Herb."
+    }
+  ]
+}
