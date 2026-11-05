@@ -4,7 +4,7 @@
 
 **Let your AI agents call your iPhone.** When an agent finds an outage or a security issue, your phone rings like a real call and reads the message aloud.
 
-**Website: [herb.grosst.cc](https://herb.grosst.cc)**
+**[Get the iPhone app on TestFlight](https://testflight.apple.com/join/3BZvn9Nf)** · **[Website](https://herb.grosst.cc)**
 
 - **Real calls:** a native iOS incoming call, even when the app is closed and the phone is locked.
 - **On-device voice:** speech is generated on your iPhone. Or skip the message and just ring.
@@ -15,7 +15,7 @@
 
 Calls are **one-way for now**: your agent speaks and you listen. You cannot talk back yet. **Full duplex calls are planned for the future.**
 
-The iPhone app is not on the App Store yet, so [build it from source](#build-the-app).
+The iPhone app is in public beta on [TestFlight](https://testflight.apple.com/join/3BZvn9Nf). You can also [build it from source](#build-the-app).
 
 ## How it is built
 
