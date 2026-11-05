@@ -3,6 +3,8 @@ import type { Bot } from "./db";
 export const MCP_TOOLS = [
   {
     name: "phone_call",
+    title: "Call my phone",
+    annotations: { title: "Call my phone", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     description:
       "Call the user's iPhone. With text, the phone speaks it after they answer. Without text, it just rings. One-way: the user cannot reply by voice. Call only when the user asked or set up the rule in advance.",
     inputSchema: {
@@ -21,6 +23,8 @@ export const MCP_TOOLS = [
   },
   {
     name: "phone_call_status",
+    title: "Check a call",
+    annotations: { title: "Check a call", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description: "Call status: ringing, answered, played, declined, missed or failed. played means the message finished playing, not that it was heard. A call without a message ends at answered.",
     inputSchema: {
       type: "object",
@@ -53,7 +57,7 @@ const toolResult = (status: number, body: unknown) => ({
 });
 
 async function dispatch(bot: Bot, message: RpcRequest, actions: McpActions) {
-  // Без id это уведомление: ответ не нужен.
+  // Without an id this is a notification, so no reply.
   if (message.id === undefined) return undefined;
   const id = message.id;
   switch (message.method) {

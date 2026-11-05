@@ -1,7 +1,7 @@
 {
   "name": "herb",
   "version": "0.1.0",
-  "description": "Звонки владельцу на iPhone через приложение Herb.",
+  "description": "Lets your agent call your iPhone through the Herb app.",
   "author": { "name": "GROSST" },
   "skills": "./skills/",
   "mcpServers": "./.mcp.json"

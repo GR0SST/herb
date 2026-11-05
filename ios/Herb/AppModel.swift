@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 @MainActor
 @Observable
@@ -10,6 +11,8 @@ final class AppModel {
     private(set) var bots: [Bot] = []
     private(set) var calls: [CallRecord] = []
     private(set) var status: RelayStatus?
+    /// Server for the sign-in screen. Can be replaced with your own.
+    var signInServer = AppModel.defaultServer
     var errorMessage: String?
 
     let callCenter = CallCenter()
@@ -21,9 +24,9 @@ final class AppModel {
     #endif
 
     var api: API? { connection.map(API.init) }
-    var isDefaultServer: Bool { connection?.baseURL == Self.defaultServer }
+    var accountKey: String? { connection.flatMap { ConnectionStore.accountKey(for: $0.baseURL) } }
 
-    /// Пуши работают сами. Показываем их только когда звонок не дойдёт до закрытого приложения.
+    /// Push works on its own. Mention it only when a call would not reach a closed app.
     var pushUnavailable: Bool {
         guard let status else { return false }
         return !status.pushEnabled || !status.pushRegistered
@@ -31,6 +34,7 @@ final class AppModel {
 
     init() {
         connection = ConnectionStore.load()
+        if let connection { signInServer = connection.baseURL }
         callCenter.api = { [weak self] in self?.api }
         callCenter.onVoipToken = { [weak self] _ in
             Task { await self?.uploadPushToken() }
@@ -41,55 +45,72 @@ final class AppModel {
         callCenter.start()
     }
 
-    /// Аккаунт появляется сам при первом запуске, без настройки.
-    func ensureAccount() async {
-        guard connection == nil else { return }
-        do {
-            try await connect(to: Self.defaultServer, token: nil)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+    private var deviceName: String { UIDevice.current.model }
+
+    func createAccount() async throws {
+        let created = try await API.createAccount(at: signInServer, deviceName: deviceName)
+        try await finishSignIn(token: created.token, key: created.key)
     }
 
-    /// Свой сервер: токен необязателен, если там открыта регистрация.
-    func connect(urlString: String, token: String) async throws {
-        var trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+    func signIn(key: String) async throws {
+        let clean = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = try await API.signIn(at: signInServer, key: clean, deviceName: deviceName)
+        try await finishSignIn(token: token, key: clean)
+    }
+
+    /// Custom server address for the sign-in screen.
+    func setServer(_ text: String) throws {
+        var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         while trimmed.hasSuffix("/") { trimmed.removeLast() }
+        guard !trimmed.isEmpty else {
+            signInServer = Self.defaultServer
+            return
+        }
         guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
               scheme == "https" || scheme == "http", url.host() != nil
         else { throw APIError.message("Enter a full address, like https://herb.example.com") }
-        let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        try await connect(to: url, token: cleanToken.isEmpty ? nil : cleanToken)
+        signInServer = url
     }
 
-    func connect(to url: URL, token: String?) async throws {
-        var resolved = token ?? ConnectionStore.token(for: url)
-        if resolved == nil { resolved = try await API.register(at: url) }
-        var candidate = Connection(baseURL: url, token: resolved!)
-        do {
-            status = try await API(connection: candidate).status()
-        } catch APIError.unauthorized where token == nil {
-            // Аккаунт удалён на сервере: создаём новый.
-            candidate = Connection(baseURL: url, token: try await API.register(at: url))
-            status = try await API(connection: candidate).status()
-        }
-        try ConnectionStore.save(candidate)
+    private func finishSignIn(token: String, key: String) async throws {
+        let candidate = Connection(baseURL: signInServer, token: token)
+        try ConnectionStore.save(candidate, accountKey: key)
         connection = candidate
-        bots = []
-        calls = []
         errorMessage = nil
         await uploadPushToken()
         await refresh()
     }
 
-    /// Удаляет данные на сервере и сразу заводит чистый аккаунт на том же сервере.
+    func signOut() async throws {
+        guard let api else { return }
+        // The push token goes away with the phone's record on the server.
+        do {
+            try await api.signOut()
+        } catch APIError.unauthorized {
+            // The phone is already gone on the server, so sign out locally too.
+        }
+        forget()
+    }
+
     func deleteAccount() async throws {
-        guard let api, let url = connection?.baseURL else { return }
-        try await api.deleteAccount()
-        ConnectionStore.removeToken(for: url)
-        connection = nil
+        guard let api else { return }
+        do {
+            try await api.deleteAccount()
+        } catch APIError.unauthorized {
+            // The account is already gone on the server, so sign out locally too.
+        }
         try? FileManager.default.removeItem(at: URL.applicationSupportDirectory.appending(path: "chats", directoryHint: .isDirectory))
-        try await connect(to: url, token: nil)
+        forget()
+    }
+
+    /// The sign-in screen shows after this.
+    private func forget() {
+        if let url = connection?.baseURL { ConnectionStore.remove(for: url) }
+        connection = nil
+        bots = []
+        calls = []
+        status = nil
+        errorMessage = nil
     }
 
     func createAgent(name: String) async throws -> String {
@@ -122,12 +143,8 @@ final class AppModel {
         } catch let error as URLError where error.code == .cancelled {
             return
         } catch APIError.unauthorized {
-            // Аккаунт удалён на сервере: заводим новый.
-            if let url = connection?.baseURL {
-                ConnectionStore.removeToken(for: url)
-                connection = nil
-                try? await connect(to: url, token: nil)
-            }
+            // The account or phone was removed, for example on the website.
+            forget()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -137,7 +154,7 @@ final class AppModel {
         calls.filter { $0.botId == bot.id }
     }
 
-    /// Пока приложение открыто, звонки приходят и без пушей.
+    /// While the app is open, calls arrive even without push.
     func pollWhileActive() async {
         while !Task.isCancelled {
             if let api, let pending = try? await api.pendingCalls() {
@@ -152,6 +169,8 @@ final class AppModel {
         do {
             try await api.registerPush(token: token, environment: pushEnvironment)
             status = try await api.status()
+        } catch APIError.unauthorized {
+            forget()
         } catch {
             errorMessage = error.localizedDescription
         }

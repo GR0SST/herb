@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct HerbApp: App {
-    // Создаётся при запуске: PushKit должен быть готов, даже когда iOS будит приложение пушем.
+    // Created at launch: PushKit must be ready even when a push wakes the app.
     @State private var model = AppModel()
 
     var body: some Scene {

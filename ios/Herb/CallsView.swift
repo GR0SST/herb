@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// История звонков: всех агентов или одного. Показывается и как главный экран агента без чата.
+/// Call history for all agents or one. Also the main screen of an agent without chat.
 struct CallsView: View {
     @Environment(AppModel.self) private var model
     let bot: Bot?
@@ -68,7 +68,7 @@ struct CallRow: View {
     }
 }
 
-/// Экран текущего звонка поверх приложения.
+/// Current call screen, shown over the app.
 struct ActiveCallView: View {
     @Environment(AppModel.self) private var model
 
@@ -83,7 +83,7 @@ struct ActiveCallView: View {
             Spacer()
             Text(session.botName.prefix(1).uppercased())
                 .font(.system(size: 48, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color(.systemBackground))
                 .frame(width: 112, height: 112)
                 .background(Color.accentColor, in: Circle())
                 .accessibilityHidden(true)

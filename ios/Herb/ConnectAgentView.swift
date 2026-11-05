@@ -1,12 +1,10 @@
 import SwiftUI
 import UIKit
 
-/// Подключение агента: код для страницы входа плагина или токен для скрипта.
+/// Connect an agent: the MCP address for plugins or a token for scripts.
 struct ConnectAgentView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var code: String?
-    @State private var codeError: String?
     @State private var name = ""
     @State private var token: String?
     @State private var tokenError: String?
@@ -19,22 +17,12 @@ struct ConnectAgentView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Sign-in code") {
-                    if let code {
-                        CopyRow(value: code, font: .title2.monospaced().weight(.semibold))
-                    } else if let codeError {
-                        Text(codeError).foregroundStyle(.red)
-                    } else {
-                        ProgressView()
-                    }
-                    Button("New Code") { Task { await loadCode() } }
-                }
                 Section("MCP server") {
-                    CopyRow(value: mcpURL, font: .footnote.monospaced())
+                    CopyRow(value: mcpURL)
                 }
                 Section("API token") {
                     if let token {
-                        CopyRow(value: token, font: .footnote.monospaced())
+                        CopyRow(value: token)
                     } else {
                         TextField("Agent name", text: $name)
                             .textInputAutocapitalization(.words)
@@ -54,18 +42,6 @@ struct ConnectAgentView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .task { await loadCode() }
-        }
-    }
-
-    private func loadCode() async {
-        code = nil
-        codeError = nil
-        guard let api = model.api else { return }
-        do {
-            code = try await api.connectCode()
-        } catch {
-            codeError = error.localizedDescription
         }
     }
 
@@ -85,7 +61,6 @@ struct ConnectAgentView: View {
 
 private struct CopyRow: View {
     let value: String
-    let font: Font
     @State private var copied = false
 
     var body: some View {
@@ -95,10 +70,9 @@ private struct CopyRow: View {
         } label: {
             HStack {
                 Text(value)
-                    .font(font)
+                    .font(.footnote.monospaced())
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
-                    .textSelection(.enabled)
                 Spacer()
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
             }

@@ -1,4 +1,4 @@
-/** Счётчик событий в скользящем окне. Размер карты ограничен: при открытой регистрации ключи задаёт интернет. */
+/** Sliding window event counter. The map is capped because with open registration the internet picks the keys. */
 export class WindowLimiter {
   private readonly hits = new Map<string, number[]>();
 
@@ -24,7 +24,7 @@ export class WindowLimiter {
   }
 }
 
-/** За Cloudflare и nginx адрес клиента приходит заголовком. Подмена даёт лишь лишние попытки. */
+/** Behind Cloudflare and nginx the client address comes in a header. Spoofing only buys extra attempts. */
 export function clientIp(request: Request) {
   return (
     request.headers.get("cf-connecting-ip") ??

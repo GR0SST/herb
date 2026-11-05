@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Herb: your AI agents can call your phone</title>
+  <meta name="description" content="Herb rings your iPhone like a real call when ChatGPT, Claude, Grok or any MCP agent needs you, and reads the message aloud.">
+  <meta property="og:title" content="Herb: your AI agents can call your phone">
+  <meta property="og:description" content="Connect ChatGPT, Claude, Grok or any MCP agent. Your iPhone rings like a real call and reads the message aloud.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://herb.grosst.cc/">
+  <meta property="og:image" content="https://herb.grosst.cc/og.png">
+  <meta property="og:image:alt" content="Herb. Your AI agent can call you now.">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://herb.grosst.cc/">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip caption-1" href="#content">Skip to content</a>
+
+  <nav class="nav" aria-label="Main">
+    <a class="brand title-3" href="/"><img src="/icon.svg" alt="" width="24" height="24">Herb</a>
+    <div class="nav-links">
+      <a class="nav-link landing-only title-4" href="/#how">How it works</a>
+      <a class="nav-link landing-only title-4" href="/#faq">Questions</a>
+      <button id="open-sign-in" class="button button-ghost button-sm" type="button">Sign in</button>
+      <a id="nav-configure" class="button button-ghost button-sm" href="/config" hidden>Configure</a>
+      <button id="sign-out" class="button button-ghost button-sm" type="button" hidden>Sign out</button>
+    </div>
+  </nav>
+
+  <main id="welcome">
+    <header class="hero" id="content">
+      <div class="hero-copy reveal">
+        <h1 class="hero-title">Your AI agent<br>can call you now</h1>
+        <p class="hero-sub body-3">Herb rings your iPhone like a real phone call and reads the message aloud, so what your agent found does not sit in a chat you never opened.</p>
+        <div class="hero-actions">
+          <button class="button button-primary button-md create-account" type="button">Create free account</button>
+          <p class="caption-2 muted">No email or password. Open source.</p>
+        </div>
+        <p class="auth-error error body-6" role="alert" hidden></p>
+      </div>
+      <figure class="phone reveal" aria-label="An iPhone lock screen showing an incoming call from Codex">
+        <div class="phone-screen">
+          <p class="caption-2 muted">Incoming call</p>
+          <p class="heading-4">Codex</p>
+          <p class="body-6 phone-message">Production is down. The payments API has been failing for five minutes.</p>
+          <div class="phone-actions" aria-hidden="true">
+            <span class="call-button call-decline"><svg aria-hidden="true" width="24" height="24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M53.93,34.62A8,8,0,1,0,42.09,45.38L69.68,75.74a141.26,141.26,0,0,0-45.27,30.44c-20,20-21.92,49.46-4.69,71.67a16,16,0,0,0,18.38,5.07l49-17.37.29-.11a16,16,0,0,0,9.75-11.72l5.9-29.51a75.89,75.89,0,0,1,8.56-2.4l90.51,99.57a8,8,0,1,0,11.84-10.76Zm43.7,74.52a16,16,0,0,0-10.32,11.94l-5.9,29.5-48.78,17.3c-.1,0-.17.13-.27.17-12.33-15.9-11-36.22,3.36-50.56a125.79,125.79,0,0,1,45.47-29.1l18.3,20.14C98.87,108.73,98.25,108.92,97.63,109.14Zm138.65,68.71a16,16,0,0,1-18.38,5.07l-9.25-3.28A8,8,0,0,1,214,164.56l9.37,3.32.3.12c12.3-15.85,11-36.17-3.39-50.51-25.66-25.66-61.88-39.27-99.35-37.31a8,8,0,1,1-.83-16c42-2.19,82.63,13.1,111.49,42C251.58,126.17,253.51,155.64,236.28,177.85Z"/></svg></span>
+            <span class="call-button call-accept"><svg aria-hidden="true" width="24" height="24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M222.37,158.46l-47.11-21.11-.13-.06a16,16,0,0,0-15.17,1.4,8.12,8.12,0,0,0-.75.56L134.87,160c-15.42-7.49-31.34-23.29-38.83-38.51l20.78-24.71c.2-.25.39-.5.57-.77a16,16,0,0,0,1.32-15.06l0-.12L97.54,33.64a16,16,0,0,0-16.62-9.52A56.26,56.26,0,0,0,32,80c0,79.4,64.6,144,144,144a56.26,56.26,0,0,0,55.88-48.92A16,16,0,0,0,222.37,158.46ZM176,208A128.14,128.14,0,0,1,48,80,40.2,40.2,0,0,1,82.87,40a.61.61,0,0,0,0,.12l21,47L83.2,111.86a6.13,6.13,0,0,0-.57.77,16,16,0,0,0-1,15.7c9.06,18.53,27.73,37.06,46.46,46.11a16,16,0,0,0,15.75-1.14,8.44,8.44,0,0,0,.74-.56L168.89,152l47,21.05h0s.08,0,.11,0A40.21,40.21,0,0,1,176,208Z"/></svg></span>
+          </div>
+        </div>
+      </figure>
+    </header>
+
+    <section class="clients reveal" aria-label="Works with">
+      <p class="caption-2 muted">Works with</p>
+      <ul class="client-list title-3">
+        <li>ChatGPT</li><li>Claude</li><li>Grok Bot</li><li>Codex</li><li>Claude Code</li><li>Any MCP client</li>
+      </ul>
+    </section>
+
+    <section class="section reveal" aria-labelledby="why-title">
+      <h2 class="heading-3 section-title" id="why-title">Notifications get lost.<br>A ringing phone does not.</h2>
+      <p class="body-3 muted section-lead">Long agent tasks finish while you are doing something else. Herb gives your agent one tool: call you. Use it for the moments you actually want to be interrupted.</p>
+      <div class="cards">
+        <article class="card">
+          <span class="card-icon"><svg aria-hidden="true" width="24" height="24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M144,104V64a8,8,0,0,1,16,0V84.69l34.34-34.35a8,8,0,0,1,11.32,11.32L171.32,96H192a8,8,0,0,1,0,16H152A8,8,0,0,1,144,104Zm79.88,79.08A56.26,56.26,0,0,1,168,232C88.6,232,24,167.4,24,88A56.24,56.24,0,0,1,72.92,32.13a16,16,0,0,1,16.62,9.51l21.12,47.15,0,.12A16,16,0,0,1,109.39,104c-.18.27-.37.52-.57.77L88,129.45c7.49,15.22,23.41,31,38.83,38.51l24.34-20.71a8.12,8.12,0,0,1,.75-.56,16,16,0,0,1,15.17-1.4l.13.06,47.11,21.11A16,16,0,0,1,223.88,183.08Zm-15.88-2s-.07,0-.11,0h0l-47-21.05-24.35,20.71a6.84,6.84,0,0,1-.74.56,16,16,0,0,1-15.75,1.14c-18.73-9.05-37.4-27.58-46.46-46.11a16,16,0,0,1,1-15.7,6.13,6.13,0,0,1,.57-.77L96,95.15l-21-47a.61.61,0,0,1,0-.12A40.2,40.2,0,0,0,40,88,128.14,128.14,0,0,0,168,216,40.21,40.21,0,0,0,208,181.07Z"/></svg></span>
+          <h3 class="title-2">Rings on the lock screen</h3>
+          <p class="body-6 muted">A real iOS incoming call, even when the app is closed and the phone is locked.</p>
+        </article>
+        <article class="card">
+          <span class="card-icon"><svg aria-hidden="true" width="24" height="24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M56,96v64a8,8,0,0,1-16,0V96a8,8,0,0,1,16,0ZM88,24a8,8,0,0,0-8,8V224a8,8,0,0,0,16,0V32A8,8,0,0,0,88,24Zm40,32a8,8,0,0,0-8,8V192a8,8,0,0,0,16,0V64A8,8,0,0,0,128,56Zm40,32a8,8,0,0,0-8,8v64a8,8,0,0,0,16,0V96A8,8,0,0,0,168,88Zm40-16a8,8,0,0,0-8,8v96a8,8,0,0,0,16,0V80A8,8,0,0,0,208,72Z"/></svg></span>
+          <h3 class="title-2">A natural voice on your phone</h3>
+          <p class="body-6 muted">The voice is generated on your iPhone, so speech never goes to a third party service. Or skip the message and just ring.</p>
+        </article>
+        <article class="card">
+          <span class="card-icon"><svg aria-hidden="true" width="24" height="24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M237.66,18.34a8,8,0,0,0-11.32,0l-52.4,52.41-5.37-5.38a32.05,32.05,0,0,0-45.26,0L100,88.69l-6.34-6.35A8,8,0,0,0,82.34,93.66L88.69,100,65.37,123.31a32,32,0,0,0,0,45.26l5.38,5.37-52.41,52.4a8,8,0,0,0,11.32,11.32l52.4-52.41,5.37,5.38a32,32,0,0,0,45.26,0L156,167.31l6.34,6.35a8,8,0,0,0,11.32-11.32L167.31,156l23.32-23.31a32,32,0,0,0,0-45.26l-5.38-5.37,52.41-52.4A8,8,0,0,0,237.66,18.34Zm-116.29,161a16,16,0,0,1-22.62,0L76.69,157.25a16,16,0,0,1,0-22.62L100,111.31,144.69,156Zm57.94-57.94L156,144.69,111.31,100l23.32-23.31a16,16,0,0,1,22.62,0l22.06,22A16,16,0,0,1,179.31,121.37ZM88.57,35A8,8,0,0,1,103.43,29l8,20A8,8,0,0,1,96.57,55ZM24.57,93A8,8,0,0,1,35,88.57l20,8A8,8,0,0,1,49,111.43l-20-8A8,8,0,0,1,24.57,93ZM231.43,163a8,8,0,0,1-10.4,4.46l-20-8A8,8,0,1,1,207,144.57l20,8A8,8,0,0,1,231.43,163Zm-64,58.06A8,8,0,0,1,152.57,227l-8-20A8,8,0,0,1,159.43,201Z"/></svg></span>
+          <h3 class="title-2">Connects in a minute</h3>
+          <p class="body-6 muted">Paste one address into your agent, sign in on the page it opens and tap Connect.</p>
+        </article>
+        <article class="card">
+          <span class="card-icon"><svg aria-hidden="true" width="24" height="24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M208,136H48a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V152A16,16,0,0,0,208,136Zm0,64H48V152H208v48Zm0-160H48A16,16,0,0,0,32,56v48a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V56A16,16,0,0,0,208,40Zm0,64H48V56H208v48ZM192,80a12,12,0,1,1-12-12A12,12,0,0,1,192,80Zm0,96a12,12,0,1,1-12-12A12,12,0,0,1,192,176Z"/></svg></span>
+          <h3 class="title-2">Yours to run</h3>
+          <p class="body-6 muted">The app and server are open source. Deploy your own and point the app at it.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section tagline" aria-label="Why Herb">
+      <p class="heading-2 tagline-text" id="tagline">Stop checking on your agents.<br>Let them call you when it matters.</p>
+    </section>
+
+    <section class="section reveal" id="how" aria-labelledby="how-title">
+      <h2 class="heading-3 section-title" id="how-title">Three steps to your first call</h2>
+      <ol class="steps">
+        <li class="card">
+          <span class="step-number caption-3">1</span>
+          <h3 class="title-2">Create an account</h3>
+          <p class="body-6 muted">You get an account key. That is all we ask for, so save it somewhere safe.</p>
+        </li>
+        <li class="card">
+          <span class="step-number caption-3">2</span>
+          <h3 class="title-2">Sign in on your iPhone</h3>
+          <p class="body-6 muted">Open the Herb app and enter your key. Every phone on the account rings.</p>
+        </li>
+        <li class="card">
+          <span class="step-number caption-3">3</span>
+          <h3 class="title-2">Add it to your agent</h3>
+          <p class="body-6 muted">Add the Herb address to your agent, then ask it to call you.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="section reveal" id="faq" aria-labelledby="faq-title">
+      <h2 class="heading-3 section-title" id="faq-title">Questions</h2>
+      <div class="faq">
+        <details><summary class="title-3">How do I get the iPhone app?</summary><p class="body-6 muted">Right now you build it from the <a href="https://github.com/GR0SST/herb">GitHub repository</a> with Xcode. It is not on the App Store yet.</p></details>
+        <details><summary class="title-3">Why is there no email or password?</summary><p class="body-6 muted">Your account is a random key, so we hold no personal details to lose. If you lose the key, you create a new account and connect your agents again.</p></details>
+        <details><summary class="title-3">Can I talk back to my agent?</summary><p class="body-6 muted">Not yet. Calls are one way: your agent speaks and you listen. Herb asks for microphone access only because iOS requires it to play a call through the earpiece. It never records you.</p></details>
+        <details><summary class="title-3">What do you store?</summary><p class="body-6 muted">The agents you connect, the text and title of each call, and its status. Call history is deleted after 30 days and uploaded audio after one day. Delete your account at any time and all of it goes. Read the <a href="/privacy">privacy policy</a>.</p></details>
+        <details><summary class="title-3">Can an agent call me without a message?</summary><p class="body-6 muted">Yes. The text is optional. Without it your phone simply rings, which works well for urgent alerts.</p></details>
+        <details><summary class="title-3">Will a call get through Do Not Disturb?</summary><p class="body-6 muted">Herb calls follow your iPhone settings, so Focus modes and silent mode can hold them back.</p></details>
+        <details><summary class="title-3">Is it free?</summary><p class="body-6 muted">Yes, with limits to keep the server healthy: 6 calls per minute for each agent and 200 calls per day for each account.</p></details>
+        <details><summary class="title-3">Can I run it on my own server?</summary><p class="body-6 muted">Yes. The <a href="https://github.com/GR0SST/herb">repository</a> has the server and setup steps. Enter your address on the app's sign in screen.</p></details>
+      </div>
+    </section>
+
+    <section class="section final reveal" aria-labelledby="final-title">
+      <h2 class="heading-3" id="final-title">Give your agent<br>your number</h2>
+      <button class="button button-primary button-md create-account" type="button">Create free account</button>
+      <p class="auth-error error body-6" role="alert" hidden></p>
+    </section>
+  </main>
+
+  <main id="dashboard" class="dashboard" hidden aria-label="Configuration">
+    <section id="new-key" class="panel panel-notice" hidden>
+      <h2 class="heading-6">Save your account key</h2>
+      <p class="body-6 muted">It is your only way in. If you lose it, create a new account.</p>
+      <div class="copy-row"><code id="new-key-value" class="body-6"></code><button class="button button-ghost button-sm copy" type="button" data-copy-from="new-key-value">Copy</button></div>
+      <button id="key-saved" class="button button-primary button-sm self-start" type="button">I saved it</button>
+    </section>
+
+    <section class="panel" id="key-panel" hidden>
+      <h2 class="heading-6">Account key</h2>
+      <div class="copy-row"><code id="key-value" class="body-6"></code><button id="key-toggle" class="button button-ghost button-sm" type="button">Show</button><button id="key-copy" class="button button-ghost button-sm" type="button">Copy</button></div>
+    </section>
+
+    <section class="panel">
+      <h2 class="heading-6">Test call</h2>
+      <form id="test-call" class="test-call">
+        <label for="test-text" class="title-4">Message</label>
+        <textarea id="test-text" class="input body-6" rows="3" maxlength="2000" placeholder="Leave empty to just ring"></textarea>
+        <div class="test-actions">
+          <button id="test-submit" class="button button-primary button-md" type="submit">Call my phone</button>
+          <p id="test-status" class="body-6 muted" role="status" hidden></p>
+        </div>
+      </form>
+      <p id="test-error" class="error body-6" role="alert" hidden></p>
+    </section>
+
+    <section class="panel">
+      <h2 class="heading-6">Connect an agent</h2>
+      <div class="copy-row"><code id="mcp-url" class="body-6"></code><button class="button button-ghost button-sm copy" type="button" data-copy-from="mcp-url">Copy</button></div>
+      <p class="body-6 muted">Add this address to your agent. It opens a sign in page here, then you tap Connect.</p>
+      <div class="tabs" role="tablist" aria-label="Agent app" id="client-tabs"></div>
+      <div id="client-steps" class="client-steps body-6" role="tabpanel"></div>
+    </section>
+
+    <section class="panel">
+      <h2 class="heading-6">Agents</h2>
+      <ul id="agents" class="list"></ul>
+      <p id="agents-empty" class="body-6 muted">Connect your first agent with the address above.</p>
+      <form id="create-token" class="token-form">
+        <label for="token-name" class="title-4">API token for scripts</label>
+        <div class="field-row">
+          <input id="token-name" class="input body-6" required maxlength="40" autocomplete="off" placeholder="Agent name">
+          <button class="button button-ghost button-sm" type="submit">Create</button>
+        </div>
+      </form>
+      <p id="token-error" class="error body-6" role="alert" hidden></p>
+      <div id="token-result" class="token-result" hidden>
+        <p class="body-6 muted">Copy it now. We show it once.</p>
+        <div class="copy-row"><code id="token-value" class="body-6"></code><button class="button button-ghost button-sm copy" type="button" data-copy-from="token-value">Copy</button></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="heading-6">Phones</h2>
+      <ul id="phones" class="list"></ul>
+      <p id="phones-empty" class="body-6 muted">Sign in to the Herb app on your iPhone with your account key.</p>
+    </section>
+
+    <section class="panel">
+      <h2 class="heading-6">Recent calls</h2>
+      <ul id="calls" class="list"></ul>
+      <p id="calls-empty" class="body-6 muted">Ask a connected agent to call you, and the call shows up here.</p>
+    </section>
+
+    <section class="panel">
+      <button id="delete-account" class="button button-danger button-sm self-start" type="button">Delete account</button>
+      <p id="account-error" class="error body-6" role="alert" hidden></p>
+    </section>
+  </main>
+
+  <footer class="foot caption-2 muted">
+    <a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a>
+    <a href="https://github.com/GR0SST/herb">GitHub</a>
+  </footer>
+
+  <dialog id="sign-in-dialog" class="dialog">
+    <form id="sign-in" class="dialog-body">
+      <h2 class="heading-6">Sign in</h2>
+      <label for="key-input" class="title-4">Account key</label>
+      <input id="key-input" class="input body-6" name="key" required autocomplete="current-password" autocapitalize="characters" spellcheck="false" placeholder="ABCD 2345 EFGH 6789 JKMN">
+      <p id="sign-in-error" class="error body-6" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="button button-ghost button-md" type="button" data-close-dialog>Cancel</button>
+        <button class="button button-primary button-md" type="submit">Sign in</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="dialog">
+    <div class="dialog-body">
+      <h2 class="heading-6" id="confirm-title"></h2>
+      <p class="body-6 muted" id="confirm-text"></p>
+      <div class="dialog-actions">
+        <button class="button button-ghost button-md" type="button" data-close-dialog>Cancel</button>
+        <button class="button button-danger button-md" type="button" id="confirm-yes"></button>
+      </div>
+    </div>
+  </dialog>
+</body>
+</html>

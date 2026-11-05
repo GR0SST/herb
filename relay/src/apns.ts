@@ -6,7 +6,7 @@ export interface PushResult {
   ok: boolean;
   status: number;
   reason?: string;
-  /** Токен больше не действует, его надо удалить. */
+  /** The token is no longer valid and must be removed. */
   invalidToken: boolean;
 }
 
@@ -19,7 +19,7 @@ export interface ApnsConfig {
   keyId: string;
   teamId: string;
   bundleId: string;
-  /** Для тестов. */
+  /** For tests. */
   hostOverride?: string;
 }
 

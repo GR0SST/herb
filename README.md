@@ -2,19 +2,34 @@
 
 # Herb
 
-An iPhone app that lets your AI agents call you. Agents ring your phone like a real call and can speak a message. Agents with an API also get a chat.
+**Let your AI agents call your iPhone.** When an agent finds an outage or a security issue, your phone rings like a real call and reads the message aloud.
+
+**Website: [herb.grosst.cc](https://herb.grosst.cc)**
+
+- **Real calls:** a native iOS incoming call, even when the app is closed and the phone is locked.
+- **On-device voice:** speech is generated on your iPhone. Or skip the message and just ring.
+- **Any agent:** ChatGPT, Claude, Grok Bot, Codex, Claude Code or any MCP client, plus a plain HTTP API.
+- **Self-hosted if you want:** use the hosted server or [run your own backend](#run-your-own-server).
+
+## Status
+
+Calls are **one-way for now**: your agent speaks and you listen. You cannot talk back yet. **Full duplex calls are planned for the future.**
+
+The iPhone app is not on the App Store yet, so [build it from source](#build-the-app).
+
+## How it is built
 
 - `ios/`: SwiftUI app (iOS 17+) with CallKit, PushKit and on-device speech.
-- `relay/`: Bun server for accounts, agents, calls, VoIP push, chat proxy and MCP.
+- `relay/`: Bun server and website for accounts, agents, calls, VoIP push, chat proxy and MCP.
 - `plugins/herb/`: plugin for Codex, Claude Code and Grok Bot.
 
-Every account gets its own agents and call history. An account is created on first launch and belongs to that phone: there is no sign-up.
+Sign up on the website or in the app. An account is a key, with no email or password. If you lose the key, create a new account. One account can have several phones, and every phone rings.
 
 ## Connect an agent
 
-See [the plugin guide](plugins/herb/README.md). Any MCP client works with `https://herb.grosst.cc/mcp`.
+Add `https://herb.grosst.cc/mcp` to ChatGPT, Claude, Grok Bot or any MCP client. It opens a sign-in page where you enter your key and tap Connect. See [the plugin guide](plugins/herb/README.md).
 
-Over HTTP, with an API token from the app:
+Over HTTP, with an API token from the website or app:
 
 ```sh
 # Just ring
@@ -24,7 +39,7 @@ curl -X POST https://herb.grosst.cc/v1/call -H "Authorization: Bearer $TOKEN"
 curl https://herb.grosst.cc/v1/call \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"text":"Пора́ встава́ть","language":"ru","title":"Wake up","idempotency_key":"wake-2026-11-05"}'
+  -d '{"text":"Production is down. The payments API has been failing for five minutes.","language":"en","title":"Production down","idempotency_key":"incident-2291"}'
 ```
 
 Instead of `text` you can send `audio_base64` and `audio_mime` (mp3, m4a, aac or wav, up to 10 MB). Status: `GET /v1/calls/<id>`.
@@ -51,6 +66,8 @@ Open `ios/Herb.xcodeproj`, set your team and bundle ID, then run on an iPhone.
 
 ## Run your own server
 
+Herb is fully self-hostable. The backend is one Bun process with a SQLite file, and it also serves the website.
+
 ```sh
 cd relay
 bun install
@@ -58,13 +75,13 @@ cp .env.example .env
 bun run start
 ```
 
-Put it behind HTTPS and set `HERB_PUBLIC_URL`. In the app, open Settings, Server and enter your address. Without `APNS_*` calls ring only while the app is open. `relay/deploy/` has systemd and nginx templates.
+Put it behind HTTPS and set `HERB_PUBLIC_URL`. On the app's sign-in screen, enter your address under Server. The website is served from the same address. Without `APNS_*` calls ring only while the app is open. `relay/deploy/` has systemd and nginx templates.
 
 Chat connects to your own services, so it is set up on the server only:
 
 ```sh
-bun run cli device list
-bun run cli bot chat <device> <agent> --chat-url http://127.0.0.1:8642/v1 --chat-model hermes-agent --chat-key-env HERMES_API_KEY
+bun run cli agents <account-key>
+bun run cli chat <agent-id> --chat-url http://127.0.0.1:8642/v1 --chat-model hermes-agent --chat-key-env HERMES_API_KEY
 ```
 
 ## Tests

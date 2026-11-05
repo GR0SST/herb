@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// История чата с одним ботом. Хранится только на телефоне.
+/// Chat history with one agent. Stored only on the phone.
 @MainActor
 @Observable
 final class ChatStore {
@@ -46,7 +46,7 @@ final class ChatStore {
         stream()
     }
 
-    /// Повтор после ошибки: последнее сообщение пользователя уже в истории.
+    /// Retry after an error: the last user message is already in the history.
     func retry() {
         guard !isStreaming, messages.last?.role == .user else { return }
         stream()

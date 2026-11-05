@@ -1,11 +1,12 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import type { Accounts } from "./app";
 import { BOTS_PER_ACCOUNT } from "./app";
-import type { Bot, Store } from "./db";
-import { clientIp, WindowLimiter } from "./limits";
+import { clearSessionCookie, readCookie, SESSION_COOKIE, sessionCookie } from "./cookies";
+import { type Bot, type Store, TEST_AGENT_NAME } from "./db";
 
 export interface OAuthOptions {
   store: Store;
-  /** Публичный адрес без завершающего слэша, например https://herb.grosst.cc */
+  /** Public address with no trailing slash, like https://herb.example.com */
   publicUrl: string;
   now?: () => number;
 }
@@ -15,12 +16,10 @@ const REFRESH_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const PENDING_TTL_MS = 10 * 60 * 1000;
 const CODE_TTL_MS = 5 * 60 * 1000;
 const WINDOW_MS = 15 * 60 * 1000;
-const MAX_CODE_FAILURES = 10;
 const MAX_REGISTRATIONS = 100;
 const MAX_FORM_BYTES = 8 * 1024;
 const FORBIDDEN_SCHEMES = new Set(["javascript", "data", "vbscript", "file", "about", "blob", "ftp", "ws", "wss"]);
 const COOKIE = "herb_login";
-const normalizeCode = (value: string) => value.toUpperCase().replace(/[^0-9A-Z]/g, "");
 
 interface Pending {
   clientId: string;
@@ -55,7 +54,7 @@ function isLoopback(url: URL) {
   return url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
 }
 
-/** https, loopback по http или собственная схема приложения (cursor://, codex://). */
+/** https, http on loopback, or an app's own scheme (cursor://, codex://). */
 export function isAllowedRedirect(value: string) {
   let url: URL;
   try {
@@ -70,7 +69,7 @@ export function isAllowedRedirect(value: string) {
   return !FORBIDDEN_SCHEMES.has(scheme);
 }
 
-/** Точное совпадение. Для loopback порт может отличаться (RFC 8252). */
+/** Exact match. On loopback the port may differ (RFC 8252). */
 function redirectMatches(registered: string[], candidate: string) {
   if (registered.includes(candidate)) return true;
   let url: URL;
@@ -86,7 +85,7 @@ function redirectMatches(registered: string[], candidate: string) {
   });
 }
 
-function page(title: string, body: string, status = 200, headers: Record<string, string> = {}) {
+function page(title: string, body: string, status = 200, headers: Record<string, string> = {}, cookies: string[] = []) {
   const html = `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
 <style>
 :root{color-scheme:light dark;--bg:#f5f4f8;--card:#fff;--text:#1c1a22;--muted:#6b6776;--line:#d9d6e0;--accent:#7c3aed}
@@ -98,18 +97,20 @@ label{display:block;font-size:14px;font-weight:600;margin:0 0 16px}
 input{display:block;width:100%;box-sizing:border-box;margin-top:6px;padding:12px;font:inherit;color:inherit;background:transparent;border:1px solid var(--line);border-radius:10px}
 button,a.button{display:block;width:100%;box-sizing:border-box;padding:12px;font:inherit;font-weight:600;text-align:center;text-decoration:none;color:#fff;background:#7c3aed;border:0;border-radius:10px;cursor:pointer}
 .error{color:#dc2626}
+.key{font:600 15px ui-monospace,Menlo,monospace;padding:12px;margin:0 0 8px;border:1px solid var(--line);border-radius:10px;overflow-wrap:anywhere;color:var(--text)}
+.secondary{background:transparent;color:var(--accent);margin-top:8px}
+.row{margin-top:16px}
 </style><main>${body}</main></html>`;
-  return new Response(html, {
-    status,
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
-      "x-content-type-options": "nosniff",
-      "referrer-policy": "same-origin",
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-      ...headers,
-    },
+  const responseHeaders = new Headers({
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "same-origin",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    ...headers,
   });
+  for (const cookie of cookies) responseHeaders.append("set-cookie", cookie);
+  return new Response(html, { status, headers: responseHeaders });
 }
 
 export function createOAuth(options: OAuthOptions) {
@@ -117,7 +118,7 @@ export function createOAuth(options: OAuthOptions) {
   const now = options.now ?? Date.now;
   const base = new URL(options.publicUrl);
   if (options.publicUrl.endsWith("/") || base.search || base.hash) throw new Error("HERB_PUBLIC_URL must have no trailing slash");
-  // На своём домене путь пустой, а не "/".
+  // At a domain root the prefix is empty, not "/".
   const prefix = base.pathname === "/" ? "" : base.pathname;
   const issuer = `${base.origin}${prefix}`;
   const resource = `${issuer}/mcp`;
@@ -126,8 +127,7 @@ export function createOAuth(options: OAuthOptions) {
 
   const pending = new Map<string, Pending>();
   const codes = new Map<string, Code>();
-  // Попытки считаются по адресу: один человек не должен блокировать вход остальным.
-  const failures = new WindowLimiter(MAX_CODE_FAILURES, WINDOW_MS);
+  let accounts: Accounts | null = null;
   let registrations: number[] = [];
 
   const sweep = () => {
@@ -136,6 +136,8 @@ export function createOAuth(options: OAuthOptions) {
     for (const [key, value] of codes) if (value.expires < t) codes.delete(key);
     registrations = registrations.filter((at) => at > t - WINDOW_MS);
   };
+
+  const acceptedResource = (value: string) => [resource, issuer].includes(value.replace(/\/+$/, ""));
 
   const authServerMetadata = {
     issuer,
@@ -185,26 +187,45 @@ export function createOAuth(options: OAuthOptions) {
     }, 201);
   }
 
-  const loginForm = (id: string, record: Pending, clientName: string, botName: string, error?: string) => {
+  const loginCookie = (csrf: string) => `${COOKIE}=${csrf}; Path=${prefix}/authorize; Max-Age=600; HttpOnly; Secure; SameSite=Lax`;
+
+  /** Connect page. Without a session it asks for a key or creates an account. With one it confirms the agent. */
+  const authorizePage = (id: string, record: Pending, clientName: string, options: { signedIn: boolean; botName?: string; error?: string; newKey?: string; cookies?: string[] }) => {
     const target = new URL(record.redirectUri);
-    return page("Connect to Herb", `<h1>Connect ${escapeHtml(clientName)}?</h1>
-<p>It will be able to call your iPhone. After this you return to ${escapeHtml(target.protocol.startsWith("http") ? target.host : target.protocol)}.</p>
-${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ""}
-<form method="post" action="${escapeHtml(prefix)}/authorize">
-<input type="hidden" name="pending" value="${escapeHtml(id)}"><input type="hidden" name="csrf" value="${escapeHtml(record.csrf)}">
-<label>Code from the Herb app<input name="code" required autofocus autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="ABCD-2345"></label>
-<label>Agent name<input name="bot_name" value="${escapeHtml(botName)}" maxlength="40" required autocomplete="off"></label>
-<button type="submit">Connect</button></form>`, error ? 400 : 200, {
-      "set-cookie": `${COOKIE}=${record.csrf}; Path=${prefix}/authorize; Max-Age=600; HttpOnly; Secure; SameSite=Lax`,
-    });
+    const hidden = `<input type="hidden" name="pending" value="${escapeHtml(id)}"><input type="hidden" name="csrf" value="${escapeHtml(record.csrf)}">`;
+    const action = `${escapeHtml(prefix)}/authorize`;
+    const error = options.error ? `<p class="error" role="alert">${escapeHtml(options.error)}</p>` : "";
+    const heading = `<h1>Connect ${escapeHtml(clientName)}</h1>`;
+    const body = options.signedIn
+      ? `${heading}
+${options.newKey ? `<p>Your account key. Save it now: it is shown only once.</p><p class="key">${escapeHtml(options.newKey)}</p>` : ""}
+<p>${escapeHtml(clientName)} will be able to call your phone. Next you return to ${escapeHtml(target.protocol.startsWith("http") ? target.host : target.protocol)}.</p>
+${error}
+<form method="post" action="${action}">${hidden}<input type="hidden" name="action" value="approve">
+<label>Agent name<input name="bot_name" value="${escapeHtml(options.botName ?? clientName)}" maxlength="40" required autocomplete="off"></label>
+<button type="submit">Connect</button></form>
+<form method="post" action="${action}">${hidden}<input type="hidden" name="action" value="signout"><button class="secondary" type="submit">Use another account</button></form>`
+      : `${heading}
+<p>Sign in to let it call your phone.</p>
+${error}
+<form method="post" action="${action}">${hidden}<input type="hidden" name="action" value="signin">
+<label>Account key<input name="key" required autofocus autocomplete="current-password" autocapitalize="characters" spellcheck="false" placeholder="ABCD-2345-EFGH-6789-JKMN"></label>
+<button type="submit">Sign In</button></form>
+<form class="row" method="post" action="${action}">${hidden}<input type="hidden" name="action" value="create"><button class="secondary" type="submit">Create Account</button></form>`;
+    return page("Connect to Herb", body, options.error ? 400 : 200, {}, [loginCookie(record.csrf), ...(options.cookies ?? [])]);
   };
 
-  function startAuthorize(url: URL) {
+  const sessionAccount = (request: Request) => {
+    const token = readCookie(request, SESSION_COOKIE);
+    return token ? store.accountIdBySession(token, now()) : null;
+  };
+
+  function startAuthorize(request: Request, url: URL) {
     sweep();
     const q = url.searchParams;
     const client = store.oauthClient(q.get("client_id") ?? "");
     const redirectUri = q.get("redirect_uri") ?? "";
-    // Без проверенного клиента и адреса возврата перенаправлять нельзя.
+    // Never redirect without a verified client and return address.
     if (!client || !redirectMatches(client.redirect_uris, redirectUri)) {
       return page("Error", "<h1>Unknown client</h1><p>Start connecting again from your agent.</p>", 400);
     }
@@ -214,7 +235,7 @@ ${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ""}
       q.get("response_type") !== "code" ||
       q.get("code_challenge_method") !== "S256" ||
       !/^[A-Za-z0-9_-]{43,128}$/.test(challenge) ||
-      (requested !== null && requested !== resource)
+      (requested !== null && !acceptedResource(requested))
     ) {
       const back = new URL(redirectUri);
       back.searchParams.set("error", "invalid_request");
@@ -232,7 +253,7 @@ ${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ""}
       expires: now() + PENDING_TTL_MS,
     };
     pending.set(id, record);
-    return loginForm(id, record, client.name, client.name);
+    return authorizePage(id, record, client.name, { signedIn: sessionAccount(request) !== null });
   }
 
   async function approve(request: Request) {
@@ -250,25 +271,38 @@ ${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ""}
     const client = store.oauthClient(record.clientId);
     if (!client) return page("Error", "<h1>Unknown client</h1>", 400);
 
-    const botName = (form.get("bot_name") ?? "").trim();
-    const ip = clientIp(request);
-    if (failures.exceeded(ip, now())) {
-      return page("Too many attempts", "<h1>Too many attempts</h1><p>Wait 15 minutes, then start again from your agent.</p>", 429);
-    }
-    if (!botName || botName.length > 40) return loginForm(id, record, client.name, client.name, "Enter an agent name, up to 40 characters");
-    const deviceId = store.consumeConnectCode(normalizeCode(form.get("code") ?? ""), now());
-    if (!deviceId) {
-      failures.record(ip, now());
-      return loginForm(id, record, client.name, botName, "Wrong or expired code. Get a new one in the Herb app");
-    }
+    const render = (options: Parameters<typeof authorizePage>[3]) => authorizePage(id, record, client.name, options);
+    const formAction = form.get("action");
+    const signedIn = sessionAccount(request);
 
-    pending.delete(id);
-    let bot = store.botByName(deviceId, botName);
-    if (!bot) {
-      if (store.countBots(deviceId) >= BOTS_PER_ACCOUNT) {
-        return page("Too many agents", `<h1>Too many agents</h1><p>Remove one in the Herb app. The limit is ${BOTS_PER_ACCOUNT}.</p>`, 403);
+    if (formAction === "signout") {
+      const token = readCookie(request, SESSION_COOKIE);
+      if (token) store.deleteSession(token);
+      return render({ signedIn: false, cookies: [clearSessionCookie()] });
+    }
+    if (formAction === "signin" || formAction === "create") {
+      const result = formAction === "create" ? accounts?.create(request) : accounts?.verifyKey(request, form.get("key") ?? "");
+      if (!result) return page("Error", "<h1>Sign-in is unavailable</h1>", 503);
+      if ("error" in result) {
+        const failure = (await result.error.json()) as { error: { message: string } };
+        return render({ signedIn: false, error: failure.error.message });
       }
-      bot = store.bot(store.addBot({ deviceId, name: botName }).id)!;
+      const session = sessionCookie(store.createSession(result.id, now()));
+      return render({ signedIn: true, newKey: (result as { key?: string }).key, cookies: [session] });
+    }
+    if (!signedIn) return render({ signedIn: false, error: "Sign in first" });
+
+    const botName = (form.get("bot_name") ?? "").trim();
+    if (!botName || botName.length > 40) return render({ signedIn: true, botName, error: "Enter an agent name, up to 40 characters" });
+    if (botName === TEST_AGENT_NAME) return render({ signedIn: true, botName: "", error: "This name is reserved" });
+    const accountId = signedIn;
+    pending.delete(id);
+    let bot = store.botByName(accountId, botName);
+    if (!bot) {
+      if (store.countBots(accountId) >= BOTS_PER_ACCOUNT) {
+        return render({ signedIn: true, botName, error: `You have too many agents. The limit is ${BOTS_PER_ACCOUNT}` });
+      }
+      bot = store.bot(store.addBot({ accountId, name: botName }).id)!;
     }
     const code = random();
     codes.set(code, {
@@ -281,7 +315,7 @@ ${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ""}
     const back = new URL(record.redirectUri);
     back.searchParams.set("code", code);
     if (record.state) back.searchParams.set("state", record.state);
-    // Браузер может заблокировать переход на чужую схему после формы, поэтому есть и ссылка.
+    // A browser may block a jump to another scheme after a form, so there is a link too.
     const href = escapeHtml(back.href);
     return page("Connected", `<h1>Connected</h1><p>${escapeHtml(client.name)} can now call you as ${escapeHtml(bot.name)}. You can return to your agent.</p><a class="button" href="${href}">Continue</a>`, 200, {
       refresh: `0;url=${back.href}`,
@@ -309,19 +343,27 @@ ${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ""}
     });
   }
 
+  /** Clients have no secrets, but some still send their id through Basic. */
+  function basicClientId(request: Request) {
+    const header = request.headers.get("authorization");
+    if (!header?.startsWith("Basic ")) return "";
+    return decodeURIComponent(Buffer.from(header.slice(6), "base64").toString().split(":")[0] ?? "");
+  }
+
   async function token(request: Request) {
     if (Number(request.headers.get("content-length") ?? 0) > MAX_FORM_BYTES) return tokenError("invalid_request", 413);
     const form = new URLSearchParams(await request.text());
-    const clientId = form.get("client_id") ?? "";
+    const clientId = form.get("client_id") ?? basicClientId(request);
+    // A 401 tells Claude and other clients to register again.
     if (!store.oauthClient(clientId)) return tokenError("invalid_client", 401);
     const requested = form.get("resource");
-    if (requested !== null && requested !== resource) return tokenError("invalid_target");
+    if (requested !== null && !acceptedResource(requested)) return tokenError("invalid_target");
 
     const grantType = form.get("grant_type");
     if (grantType === "authorization_code") {
       const value = form.get("code") ?? "";
       const code = codes.get(value);
-      // Код одноразовый: удаляется при любой попытке.
+      // A code is single use: any attempt removes it.
       codes.delete(value);
       if (!code || code.expires < now() || code.clientId !== clientId || code.redirectUri !== form.get("redirect_uri")) {
         return tokenError("invalid_grant");
@@ -335,7 +377,7 @@ ${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ""}
       const hash = hashToken(form.get("refresh_token") ?? "");
       const reused = store.oauthGrantByPreviousRefresh(hash);
       if (reused) {
-        // Старый токен предъявили повторно: возможна кража, отзываем весь доступ клиента.
+        // An old token came back, which may mean theft, so revoke the client's access.
         store.deleteOAuthGrant(reused.id);
         return tokenError("invalid_grant");
       }
@@ -352,7 +394,7 @@ ${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ""}
     return new Response(null, { status: 200, headers: NO_STORE });
   }
 
-  /** Возвращает null, если путь не относится к OAuth. */
+  /** Returns null when the path is not an OAuth route. */
   async function handle(request: Request, url: URL): Promise<Response | null> {
     const path = url.pathname;
     const method = request.method;
@@ -360,7 +402,7 @@ ${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ""}
     if (path.startsWith("/.well-known/openid-configuration") && method === "GET") return json(authServerMetadata);
     if (path.startsWith("/.well-known/oauth-protected-resource") && method === "GET") return json(resourceMetadata);
     if (path === "/register" && method === "POST") return register(request);
-    if (path === "/authorize" && method === "GET") return startAuthorize(url);
+    if (path === "/authorize" && method === "GET") return startAuthorize(request, url);
     if (path === "/authorize" && method === "POST") return approve(request);
     if (path === "/token" && method === "POST") return token(request);
     if (path === "/revoke" && method === "POST") return revoke(request);
@@ -371,10 +413,14 @@ ${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ""}
     return store.botByOAuthAccess(hashToken(value), now());
   }
 
-  /** Подсказка клиенту, где начинается вход. */
+  /** Tells the client where sign-in starts. */
+  function useAccounts(value: Accounts) {
+    accounts = value;
+  }
+
   const challengeHeader = `Bearer resource_metadata="${resourceMetadataUrl}"`;
 
-  return { handle, botByAccessToken, challengeHeader };
+  return { handle, botByAccessToken, challengeHeader, useAccounts };
 }
 
 export type OAuth = ReturnType<typeof createOAuth>;

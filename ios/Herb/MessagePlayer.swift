@@ -1,7 +1,7 @@
 import AVFoundation
 import NaturalLanguage
 
-/// Проигрывает сообщение звонка: готовое аудио, голос Lily или запасной голос iOS.
+/// Plays a call's message: uploaded audio, the Lily voice or the iOS fallback voice.
 @MainActor
 final class MessagePlayer: NSObject, @preconcurrency AVSpeechSynthesizerDelegate, @preconcurrency AVAudioPlayerDelegate {
     private let synthesizer = AVSpeechSynthesizer()
@@ -18,7 +18,7 @@ final class MessagePlayer: NSObject, @preconcurrency AVSpeechSynthesizerDelegate
         speaker.prepare(id: id, text: text, language: language)
     }
 
-    /// onFinish получает успех и то, пришлось ли читать запасным голосом.
+    /// onFinish receives success and whether the fallback voice was used.
     func speak(id: UUID, text: String, language: String?, onFirstAudio: @escaping () -> Void, onFinish: @escaping (Bool, Bool) -> Void) {
         speaker.start(id: id, onFirstAudio: onFirstAudio) { [weak self] end in
             guard let self else { return }
@@ -47,7 +47,7 @@ final class MessagePlayer: NSObject, @preconcurrency AVSpeechSynthesizerDelegate
         }
     }
 
-    /// Останавливает без вызова onFinish: это делает тот, кто прервал.
+    /// Stops without calling onFinish: whoever interrupts handles that.
     func stop() {
         onFinish = nil
         speaker.cancel()

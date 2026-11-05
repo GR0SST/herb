@@ -103,7 +103,7 @@ private struct MessageBubble: View {
                 .textSelection(.enabled)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .foregroundStyle(isUser ? Color.white : Color.primary)
+                .foregroundStyle(isUser ? Color(.systemBackground) : Color.primary)
                 .background(isUser ? Color.accentColor : Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
             if !isUser { Spacer(minLength: 48) }
         }

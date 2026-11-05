@@ -5,7 +5,7 @@
     {
       "name": "herb",
       "source": "./plugins/herb",
-      "description": "Звонки владельцу на iPhone через приложение Herb."
+      "description": "Lets your agent call your iPhone through the Herb app."
     }
   ]
 }

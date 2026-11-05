@@ -57,7 +57,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
 }
 
 extension String {
-    /// Текст без знаков ударения: они нужны синтезатору, а не для чтения.
+    /// Text without stress marks, which are for the voice model and not for reading.
     var withoutStressMarks: String { replacingOccurrences(of: "\u{301}", with: "") }
 }
 
@@ -77,9 +77,7 @@ struct NewAgent: Codable {
     let token: String
 }
 
-struct ConnectCode: Codable {
-    let code: String
-}
+
 
 struct Connection: Equatable {
     let baseURL: URL

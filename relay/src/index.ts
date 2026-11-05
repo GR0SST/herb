@@ -40,7 +40,7 @@ const server = Bun.serve({
   hostname: process.env.HOST ?? "127.0.0.1",
   port: Number(process.env.PORT ?? 8790),
   maxRequestBodySize: MAX_BODY_BYTES,
-  // Ответ чата может думать дольше стандартных 10 секунд.
+  // A chat reply can take longer than the default 10 seconds.
   idleTimeout: 255,
   fetch: (request) => app.handle(request),
 });

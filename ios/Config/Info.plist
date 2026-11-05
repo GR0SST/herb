@@ -12,6 +12,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>iOS requires this to play calls through the earpiece. Herb never records you.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Herb connects to your own server on the local network.</string>
 </dict>

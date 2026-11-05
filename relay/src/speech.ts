@@ -1,10 +1,10 @@
-// Языки Supertonic 3. Ударения и выбор языка на стороне агента: сервер принимает любой текст.
+// Supertonic 3 languages. Stress marks and language are up to the agent: the server accepts any text.
 const LANGUAGES = new Set([
   "ar", "bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hi", "hu", "id", "it", "ja", "ko",
   "lv", "lt", "pl", "pt", "ro", "ru", "sk", "sl", "es", "sv", "tr", "uk", "vi",
 ]);
 
-/** Неизвестный или пропущенный язык не ошибка: телефон определит его по тексту. */
+/** An unknown or missing language is not an error: the phone detects it from the text. */
 export function normalizeLanguage(requested: unknown) {
   return typeof requested === "string" && LANGUAGES.has(requested) ? requested : undefined;
 }

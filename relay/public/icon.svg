@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Herb</title>
+  <rect width="1024" height="1024" fill="#000000"/>
+  <circle cx="512" cy="512" r="102" fill="#FFFFFF"/>
+  <path d="M375 302 A250 250 0 0 0 375 722 M649 302 A250 250 0 0 1 649 722" fill="none" stroke="#FFFFFF" stroke-width="76" stroke-linecap="round"/>
+</svg>

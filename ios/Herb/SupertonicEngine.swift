@@ -1,8 +1,8 @@
 import Foundation
 import OnnxRuntimeBindings
 
-/// Supertonic 3 на телефоне с настройками голоса из Ringmind: Lily (F2), скорость 1,2. Шагов меньше ради скорости.
-/// Вся работа идёт на одной очереди: ONNX-сессии нельзя запускать параллельно с выгрузкой.
+/// Supertonic 3 on the phone: Lily voice (F2), speed 1.2, with few steps for speed.
+/// All work runs on one queue: ONNX sessions must not run while being unloaded.
 final class SupertonicEngine: @unchecked Sendable {
     static let shared = SupertonicEngine()
 
@@ -10,13 +10,13 @@ final class SupertonicEngine: @unchecked Sendable {
     private static let speed: Float = 1.2
     private static let voice = "F2"
     private static let pauseBetweenPhrases: Float = 0.25
-    /// Короткие фразы дают быстрый первый звук. Предел длины, а не точная длина.
+    /// Short phrases give a fast first sound. This is a limit, not an exact length.
     private static let maxPhraseLength = 140
 
     private let queue = DispatchQueue(label: "cc.grosst.herb.supertonic", qos: .userInitiated)
     private var loaded: (env: ORTEnv, tts: TextToSpeech, style: Style)?
 
-    /// Флаг отмены, который проверяется между фразами.
+    /// Cancellation flag, checked between phrases.
     final class Job: @unchecked Sendable {
         private let lock = NSLock()
         private var cancelled = false
@@ -35,7 +35,7 @@ final class SupertonicEngine: @unchecked Sendable {
     }
 
     static func phrases(of text: String) -> [String] {
-        // NFC сохраняет й и ё целыми до разбиения, а синтез сам разложит текст на символы.
+        // NFC keeps composed letters whole during splitting. Synthesis decomposes the text itself.
         chunkText(text.precomposedStringWithCanonicalMapping, maxLen: maxPhraseLength).filter { !$0.isEmpty }
     }
 
@@ -50,7 +50,7 @@ final class SupertonicEngine: @unchecked Sendable {
         return value
     }
 
-    /// Генерирует фразы по очереди. onPhrase вызывается сразу после каждой: так звук идёт, пока остальное считается.
+    /// Generates phrases in order. onPhrase fires after each one, so sound plays while the rest is computed.
     func generate(
         phrases: [String],
         language: String,
@@ -85,7 +85,7 @@ final class SupertonicEngine: @unchecked Sendable {
         }
     }
 
-    /// Модель занимает сотни мегабайт, поэтому между звонками её в памяти нет.
+    /// The model takes hundreds of megabytes, so it is not kept in memory between calls.
     func unload() {
         queue.async { [self] in loaded = nil }
     }

@@ -49,19 +49,40 @@ struct API {
         return data
     }
 
-    /// Новый аккаунт на сервере: токена ещё нет, поэтому запрос без авторизации.
-    static func register(at baseURL: URL) async throws -> String {
-        struct Body: Decodable { let token: String }
-        var request = URLRequest(url: baseURL.appending(path: "v1/register"))
+    private struct NewSession: Decodable {
+        let token: String
+        let key: String?
+    }
+
+    private static func openSession(at baseURL: URL, path: String, body: [String: String]) async throws -> NewSession {
+        var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = "POST"
         request.timeoutInterval = 20
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await URLSession.shared.data(for: request)
-        let probe = API(connection: Connection(baseURL: baseURL, token: ""))
-        try probe.check(response, data)
-        return try JSONDecoder().decode(Body.self, from: data).token
+        // Here 401 means a wrong key, not a missing account.
+        if (response as? HTTPURLResponse)?.statusCode == 401 { throw APIError.message("Wrong account key") }
+        try API(connection: Connection(baseURL: baseURL, token: "")).check(response, data)
+        return try JSONDecoder().decode(NewSession.self, from: data)
+    }
+
+    /// New account: the server returns the key and a token for this phone.
+    static func createAccount(at baseURL: URL, deviceName: String) async throws -> (key: String, token: String) {
+        let session = try await openSession(at: baseURL, path: "v1/accounts", body: ["device_name": deviceName])
+        guard let key = session.key else { throw APIError.message("The server returned no account key") }
+        return (key, session.token)
+    }
+
+    static func signIn(at baseURL: URL, key: String, deviceName: String) async throws -> String {
+        try await openSession(at: baseURL, path: "v1/sessions", body: ["key": key, "device_name": deviceName]).token
     }
 
     func deleteAccount() async throws {
+        _ = try await send(request("v1/account", method: "DELETE"))
+    }
+
+    func signOut() async throws {
         _ = try await send(request("v1/device", method: "DELETE"))
     }
 
@@ -72,10 +93,6 @@ struct API {
 
     func deleteAgent(id: String) async throws {
         _ = try await send(request("v1/bots/\(id)", method: "DELETE"))
-    }
-
-    func connectCode() async throws -> String {
-        try JSONDecoder().decode(ConnectCode.self, from: await send(request("v1/connect-codes", method: "POST"))).code
     }
 
     func status() async throws -> RelayStatus {
@@ -122,7 +139,7 @@ struct API {
         _ = try await send(request("v1/device", method: "PUT", body: Body(voip_token: token, environment: environment)))
     }
 
-    /// Ответ бота частями: сервер проксирует поток OpenAI-совместимого API.
+    /// The agent's reply in chunks: the server proxies an OpenAI-compatible stream.
     func chat(botID: String, messages: [ChatMessage]) -> AsyncThrowingStream<String, Error> {
         struct Wire: Encodable { let role: String; let content: String }
         struct Body: Encodable { let messages: [Wire] }

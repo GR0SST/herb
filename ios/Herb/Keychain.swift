@@ -1,19 +1,18 @@
 import Foundation
 import Security
 
-/// Токены по серверам: при смене сервера и возврате аккаунт сохраняется.
-/// Доступны после первой разблокировки, чтобы VoIP-пуш мог ответить на звонок на заблокированном экране.
+/// Phone token and account key for each server.
+/// Available after first unlock, so a VoIP push can answer a call on the lock screen.
 enum ConnectionStore {
     private struct Stored: Codable {
         var current: String?
-        var tokens: [String: String]
+        var tokens: [String: String] = [:]
+        var keys: [String: String] = [:]
     }
 
-    private static let service = "cc.grosst.herb.connection"
-    private static let legacyServer = "https://s.grosst.cc/herb"
     private static let baseQuery: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: service,
+        kSecAttrService as String: "cc.grosst.herb.account",
         kSecAttrAccount as String: "relay",
     ]
 
@@ -21,28 +20,11 @@ enum ConnectionStore {
         var query = baseQuery
         query[kSecReturnData as String] = true
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else {
-            return Stored(current: nil, tokens: [:])
-        }
-        if let stored = try? JSONDecoder().decode(Stored.self, from: data) {
-            return migrated(stored)
-        }
-        // Первая версия хранила один сервер.
-        if let old = try? JSONDecoder().decode([String: String].self, from: data), let url = old["url"], let token = old["token"] {
-            return migrated(Stored(current: url, tokens: [url: token]))
-        }
-        return Stored(current: nil, tokens: [:])
-    }
-
-    /// Сервер переехал на свой домен, аккаунт остался тем же.
-    private static func migrated(_ stored: Stored) -> Stored {
-        var result = stored
-        let target = AppModel.defaultServer.absoluteString
-        if let token = result.tokens.removeValue(forKey: legacyServer) {
-            result.tokens[target] = token
-        }
-        if result.current == legacyServer { result.current = target }
-        return result
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data,
+              let stored = try? JSONDecoder().decode(Stored.self, from: data)
+        else { return Stored() }
+        return stored
     }
 
     private static func write(_ stored: Stored) throws {
@@ -62,23 +44,25 @@ enum ConnectionStore {
         return Connection(baseURL: url, token: token)
     }
 
-    static func token(for url: URL) -> String? {
-        read().tokens[url.absoluteString]
+    static func accountKey(for url: URL) -> String? {
+        read().keys[url.absoluteString]
     }
 
-    static func save(_ connection: Connection) throws {
+    static func save(_ connection: Connection, accountKey: String?) throws {
         var stored = read()
-        let key = connection.baseURL.absoluteString
-        stored.current = key
-        stored.tokens[key] = connection.token
+        let server = connection.baseURL.absoluteString
+        stored.current = server
+        stored.tokens[server] = connection.token
+        if let accountKey { stored.keys[server] = accountKey }
         try write(stored)
     }
 
-    static func removeToken(for url: URL) {
+    static func remove(for url: URL) {
         var stored = read()
-        let key = url.absoluteString
-        stored.tokens[key] = nil
-        if stored.current == key { stored.current = nil }
+        let server = url.absoluteString
+        stored.tokens[server] = nil
+        stored.keys[server] = nil
+        if stored.current == server { stored.current = nil }
         try? write(stored)
     }
 }

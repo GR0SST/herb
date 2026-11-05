@@ -17,8 +17,8 @@ struct CallSession: Identifiable, Equatable {
     var phase: Phase = .ringing
 }
 
-/// Звонки: VoIP-пуши, CallKit и проигрывание сообщения.
-/// В симуляторе CallKit не показывает вызов, поэтому там работает экран приложения.
+/// Calls: VoIP push, CallKit and message playback.
+/// CallKit shows no call in the simulator, so the app's own screen is used there.
 @MainActor
 @Observable
 final class CallCenter: NSObject {
@@ -71,7 +71,7 @@ final class CallCenter: NSObject {
         registry.desiredPushTypes = [.voIP]
     }
 
-    /// Звонок, найденный опросом при открытом приложении.
+    /// A call found by polling while the app is open.
     func reportIfNew(_ record: CallRecord) {
         guard let id = UUID(uuidString: record.id), !known.contains(id) else { return }
         report(id: id, botName: record.botName, title: record.title) {}
@@ -99,9 +99,9 @@ final class CallCenter: NSObject {
         provider.reportNewIncomingCall(with: id, update: update) { [weak self] error in
             MainActor.assumeIsolated {
                 if let error = error as? CXErrorCodeIncomingCallError, error.code == .callUUIDAlreadyExists {
-                    // Опрос и пуш сообщили об одном звонке: это нормально.
+                    // Polling and push reported the same call, which is fine.
                 } else if error != nil {
-                    // Например, режим «Не беспокоить». Звонок не показан.
+                    // For example Do Not Disturb. The call was not shown.
                     self?.finish(id, relayStatus: .missed)
                 } else {
                     self?.scheduleTimeout(id)
@@ -112,7 +112,7 @@ final class CallCenter: NSObject {
         }
     }
 
-    /// Начинает синтез, пока телефон звонит: к ответу первая фраза уже готова.
+    /// Starts speech while the phone rings, so the first phrase is ready on answer.
     private func prepareMessage(_ id: UUID) {
         guard let api = api() else { return }
         Task { [weak self] in
@@ -132,7 +132,7 @@ final class CallCenter: NSObject {
         }
     }
 
-    // MARK: Кнопки экрана приложения
+    // MARK: In-app call buttons
 
     func answer(_ id: UUID) {
         if useCallKit {
@@ -151,13 +151,15 @@ final class CallCenter: NSObject {
         }
     }
 
-    // MARK: Ход звонка
+    // MARK: Call flow
 
     private func beginAnswer(_ id: UUID) {
         guard sessions[id] != nil else { return }
         sessions[id]?.phase = .connecting
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+            // Call mode: audio plays through the earpiece and the speaker toggle works as usual.
+            // Nothing is recorded, but iOS offers the earpiece only in this mode.
+            try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
         } catch {
             finishAfterFailure(id, "Could not set up audio")
             return
@@ -180,7 +182,7 @@ final class CallCenter: NSObject {
                 player.prepareSpeech(id: id, text: text, language: record.language)
                 pending = (id, .text(text, language: record.language))
             } else {
-                // Звонок без сообщения: ответа достаточно.
+                // A call without a message: answering is enough.
                 finish(id, relayStatus: nil, note: "Answered")
                 endSystemCall(id)
                 return
@@ -199,7 +201,7 @@ final class CallCenter: NSObject {
         playIfReady()
     }
 
-    /// Играть можно, когда есть и сообщение, и активная аудиосессия.
+    /// Playback needs both the message and an active audio session.
     private func playIfReady() {
         guard audioActive, let (id, message) = pending, sessions[id] != nil else { return }
         pending = nil
@@ -231,7 +233,7 @@ final class CallCenter: NSObject {
         case .ringing:
             finish(id, relayStatus: .declined)
         case .connecting, .playing:
-            // Отвечен, но прослушан не до конца: статус остаётся answered.
+            // Answered but not heard to the end, so the status stays answered.
             finish(id, relayStatus: nil, note: "Ended")
         case .ended:
             break
@@ -261,7 +263,7 @@ final class CallCenter: NSObject {
             }
             self?.onCallFinished()
         }
-        // Итог виден пару секунд, потом экран звонка закрывается сам.
+        // The result shows for two seconds, then the call screen closes.
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(2))
             self?.sessions[id] = nil
@@ -289,7 +291,7 @@ extension CallCenter: PKPushRegistryDelegate {
         let botName = data["bot_name"] as? String ?? "Herb"
         let title = data["title"] as? String
         MainActor.assumeIsolated {
-            // iOS требует показать вызов на каждый VoIP-пуш, иначе закрывает приложение.
+            // iOS requires a reported call for every VoIP push, or it terminates the app.
             guard let id else {
                 let fallback = UUID()
                 report(id: fallback, botName: botName, title: nil) { [weak self] in

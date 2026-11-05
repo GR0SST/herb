@@ -6,9 +6,9 @@ import type { Call, Device } from "../src/db";
 
 const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
 const keyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
-const device: Device = { id: "d", name: "iPhone", voip_token: "abc123", environment: "sandbox" };
+const device: Device = { id: "d", account_id: "a", name: "iPhone", voip_token: "abc123", environment: "sandbox", created_at: 1 };
 const call: Call = {
-  id: "call-1", bot_id: "b", bot_name: "Grok", title: null, text: "секретный текст", language: "ru", audio_mime: null,
+  id: "call-1", bot_id: "b", bot_name: "Grok", title: null, text: "secret text", language: "ru", audio_mime: null,
   status: "ringing", created_at: 1, updated_at: 1,
 };
 
@@ -22,7 +22,7 @@ test("JWT is a verifiable ES256 token", () => {
 });
 
 test("push payload never carries the message text", () => {
-  expect(JSON.stringify(voipPayload(call))).not.toContain("секретный");
+  expect(JSON.stringify(voipPayload(call))).not.toContain("secret");
 });
 
 function fakeApns(status: number, responseBody: string) {

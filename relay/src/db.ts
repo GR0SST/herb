@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto";
 
 export type CallStatus = "ringing" | "answered" | "played" | "declined" | "missed" | "failed";
 const TERMINAL: readonly CallStatus[] = ["played", "declined", "missed", "failed"];
@@ -14,19 +14,20 @@ const TRANSITIONS: Record<CallStatus, readonly CallStatus[]> = {
 
 export interface Bot {
   id: string;
-  device_id: string;
+  account_id: string;
   name: string;
   chat_url: string | null;
   chat_key_env: string | null;
   chat_model: string | null;
 }
 
-/** Аккаунт: один телефон. */
 export interface Device {
   id: string;
+  account_id: string;
   name: string;
   voip_token: string | null;
   environment: "sandbox" | "production";
+  created_at: number;
 }
 
 export interface Call {
@@ -56,11 +57,26 @@ export interface OAuthGrant {
 }
 
 export const RING_TIMEOUT_MS = 60_000;
+/** Internal agent for test calls. Hidden from the agent list, and its name is reserved. */
+export const TEST_AGENT_NAME = "Test call";
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+// No lookalike characters, since keys may be typed by hand.
+const KEY_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+const KEY_LENGTH = 20;
 
 export const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 const newToken = (prefix: string) => `${prefix}_${randomBytes(32).toString("base64url")}`;
 
-const BOT_COLUMNS = "id, device_id, name, chat_url, chat_key_env, chat_model";
+/** An account key can be typed in any case, with dashes or spaces. */
+export const normalizeKey = (value: string) => value.toUpperCase().replace(/[^0-9A-Z]/g, "");
+
+function newAccountKey() {
+  const raw = Array.from({ length: KEY_LENGTH }, () => KEY_ALPHABET[randomInt(KEY_ALPHABET.length)]).join("");
+  return raw.match(/.{4}/g)!.join("-");
+}
+
+const BOT_COLUMNS = "id, account_id, name, chat_url, chat_key_env, chat_model";
+const DEVICE_COLUMNS = "id, account_id, name, voip_token, environment, created_at";
 const CALL_SELECT = `SELECT c.id, c.bot_id, b.name AS bot_name, c.title, c.text, c.language, c.audio_mime, c.status, c.created_at, c.updated_at
   FROM calls c JOIN bots b ON b.id = c.bot_id`;
 
@@ -71,21 +87,36 @@ export class Store {
     this.db = new Database(path, { create: true, strict: true });
     this.db.run("PRAGMA journal_mode = WAL");
     this.db.run("PRAGMA foreign_keys = ON");
-    this.db.run(`CREATE TABLE IF NOT EXISTS devices (
-      id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, token_hash TEXT NOT NULL UNIQUE,
-      voip_token TEXT, environment TEXT NOT NULL DEFAULT 'sandbox'
+    this.db.run(`CREATE TABLE IF NOT EXISTS accounts (
+      id TEXT PRIMARY KEY, key_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL
     )`);
-    this.migrateBots();
+    this.db.run(`CREATE TABLE IF NOT EXISTS devices (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+      voip_token TEXT, environment TEXT NOT NULL DEFAULT 'sandbox', created_at INTEGER NOT NULL
+    )`);
+    this.db.run(`CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      expires_at INTEGER NOT NULL
+    )`);
+    this.db.run(`CREATE TABLE IF NOT EXISTS bots (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+      chat_url TEXT, chat_key_env TEXT, chat_model TEXT,
+      UNIQUE (account_id, name)
+    )`);
     this.db.run(`CREATE TABLE IF NOT EXISTS calls (
       id TEXT PRIMARY KEY, bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-      title TEXT, text TEXT, audio_mime TEXT, status TEXT NOT NULL,
-      idempotency_key TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      title TEXT, text TEXT, language TEXT, audio_mime TEXT, audio_bytes INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL, idempotency_key TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
       UNIQUE (bot_id, idempotency_key)
     )`);
     this.db.run("CREATE INDEX IF NOT EXISTS calls_created ON calls(created_at DESC)");
-    this.addColumn("calls", "language", "TEXT");
-    this.addColumn("calls", "audio_bytes", "INTEGER NOT NULL DEFAULT 0");
-    this.addColumn("devices", "created_at", "INTEGER NOT NULL DEFAULT 0");
+    const botColumns = this.db.query<{ name: string }, []>("PRAGMA table_info(bots)").all();
+    if (!botColumns.some((c) => c.name === "system")) this.db.run("ALTER TABLE bots ADD COLUMN system INTEGER NOT NULL DEFAULT 0");
     this.db.run(`CREATE TABLE IF NOT EXISTS oauth_clients (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, redirect_uris TEXT NOT NULL, created_at INTEGER NOT NULL
     )`);
@@ -98,102 +129,87 @@ export class Store {
       previous_refresh_hash TEXT
     )`);
     this.db.run("CREATE INDEX IF NOT EXISTS oauth_prev ON oauth_grants(previous_refresh_hash)");
-    this.db.run(`CREATE TABLE IF NOT EXISTS connect_codes (
-      code_hash TEXT PRIMARY KEY,
-      device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-      expires_at INTEGER NOT NULL
-    )`);
   }
 
-  private columns(table: string) {
-    return this.db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all().map((c) => c.name);
-  }
+  // Accounts
 
-  private addColumn(table: string, column: string, definition: string) {
-    if (!this.columns(table).includes(column)) this.db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
-
-  /** Боты принадлежат аккаунту. Старая база с одним владельцем целиком переходит к первому телефону. */
-  private migrateBots() {
-    const create = (name: string) => `CREATE TABLE ${name} (
-      id TEXT PRIMARY KEY,
-      device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-      name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
-      chat_url TEXT, chat_key_env TEXT, chat_model TEXT,
-      UNIQUE (device_id, name)
-    )`;
-    const existing = this.columns("bots");
-    if (existing.length === 0) {
-      this.db.run(create("bots"));
-      return;
-    }
-    if (existing.includes("device_id")) return;
-
-    this.db.run("PRAGMA foreign_keys = OFF");
-    this.db.transaction(() => {
-      let owner = this.db.query<{ id: string }, []>("SELECT id FROM devices ORDER BY rowid LIMIT 1").get()?.id;
-      const botCount = this.db.query<{ n: number }, []>("SELECT count(*) AS n FROM bots").get()!.n;
-      if (!owner && botCount > 0) owner = this.addDevice("owner").id;
-      this.db.run(create("bots_new"));
-      if (owner) {
-        this.db
-          .query(`INSERT INTO bots_new (id, device_id, name, token_hash, chat_url, chat_key_env, chat_model)
-                  SELECT id, ?, name, token_hash, chat_url, chat_key_env, chat_model FROM bots`)
-          .run(owner);
-      }
-      this.db.run("DROP TABLE bots");
-      this.db.run("ALTER TABLE bots_new RENAME TO bots");
-    })();
-    this.db.run("PRAGMA foreign_keys = ON");
-  }
-
-  // Аккаунты
-
-  addDevice(name: string, now = Date.now()) {
+  createAccount(now: number) {
     const id = randomUUID();
-    const token = newToken("herb_dev");
-    this.db.query("INSERT INTO devices (id, name, token_hash, created_at) VALUES (?, ?, ?, ?)").run(id, name, hashToken(token), now);
-    return { id, token };
+    const key = newAccountKey();
+    this.db.query("INSERT INTO accounts (id, key_hash, created_at) VALUES (?, ?, ?)").run(id, hashToken(normalizeKey(key)), now);
+    return { id, key };
   }
 
-  /** Анонимный аккаунт: имя служебное, в приложении его не видно. */
-  registerDevice(now: number) {
-    return this.addDevice(`device-${randomBytes(6).toString("hex")}`, now);
+  accountIdByKey(key: string) {
+    return this.db.query<{ id: string }, [string]>("SELECT id FROM accounts WHERE key_hash = ?").get(hashToken(normalizeKey(key)))?.id ?? null;
   }
 
-  deviceByToken(token: string) {
-    return this.db
-      .query<Device, [string]>("SELECT id, name, voip_token, environment FROM devices WHERE token_hash = ?")
-      .get(hashToken(token));
+  accountExists(id: string) {
+    return this.db.query("SELECT 1 FROM accounts WHERE id = ?").get(id) !== null;
   }
 
-  device(id: string) {
-    return this.db.query<Device, [string]>("SELECT id, name, voip_token, environment FROM devices WHERE id = ?").get(id);
-  }
-
-  deviceByName(name: string) {
-    return this.db.query<Device, [string]>("SELECT id, name, voip_token, environment FROM devices WHERE name = ?").get(name);
-  }
-
-  listDevices() {
-    return this.db.query<Device, []>("SELECT id, name, voip_token, environment FROM devices ORDER BY name").all();
-  }
-
-  removeDevice(name: string) {
-    return this.db.query("DELETE FROM devices WHERE name = ?").run(name).changes > 0;
-  }
-
-  /** Возвращает id звонков, чтобы удалить их аудио. */
-  deleteDevice(id: string) {
+  /** Returns call ids so their audio can be deleted. */
+  deleteAccount(id: string) {
     const calls = this.db
-      .query<{ id: string }, [string]>("SELECT c.id FROM calls c JOIN bots b ON b.id = c.bot_id WHERE b.device_id = ?")
+      .query<{ id: string }, [string]>("SELECT c.id FROM calls c JOIN bots b ON b.id = c.bot_id WHERE b.account_id = ?")
       .all(id);
-    this.db.query("DELETE FROM devices WHERE id = ?").run(id);
+    this.db.query("DELETE FROM accounts WHERE id = ?").run(id);
     return calls.map((c) => c.id);
   }
 
+  /** Abandoned accounts: no phone and no agent. */
+  purgeAbandonedAccounts(cutoff: number) {
+    this.db
+      .query(`DELETE FROM accounts WHERE created_at < ?
+              AND id NOT IN (SELECT account_id FROM devices) AND id NOT IN (SELECT account_id FROM bots)`)
+      .run(cutoff);
+  }
+
+  // Web sessions
+
+  createSession(accountId: string, now: number) {
+    const token = randomBytes(32).toString("base64url");
+    this.db.query("INSERT INTO sessions (token_hash, account_id, expires_at) VALUES (?, ?, ?)").run(hashToken(token), accountId, now + SESSION_TTL_MS);
+    return token;
+  }
+
+  accountIdBySession(token: string, now: number) {
+    return this.db
+      .query<{ account_id: string }, [string, number]>("SELECT account_id FROM sessions WHERE token_hash = ? AND expires_at > ?")
+      .get(hashToken(token), now)?.account_id ?? null;
+  }
+
+  deleteSession(token: string) {
+    this.db.query("DELETE FROM sessions WHERE token_hash = ?").run(hashToken(token));
+  }
+
+  // Phones
+
+  addDevice(accountId: string, name: string, now: number) {
+    const id = randomUUID();
+    const token = newToken("herb_dev");
+    this.db.query("INSERT INTO devices (id, account_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, ?)").run(id, accountId, name, hashToken(token), now);
+    return { id, token };
+  }
+
+  deviceByToken(token: string) {
+    return this.db.query<Device, [string]>(`SELECT ${DEVICE_COLUMNS} FROM devices WHERE token_hash = ?`).get(hashToken(token));
+  }
+
+  device(id: string) {
+    return this.db.query<Device, [string]>(`SELECT ${DEVICE_COLUMNS} FROM devices WHERE id = ?`).get(id);
+  }
+
+  listDevices(accountId: string) {
+    return this.db.query<Device, [string]>(`SELECT ${DEVICE_COLUMNS} FROM devices WHERE account_id = ? ORDER BY created_at`).all(accountId);
+  }
+
+  deleteDevice(id: string) {
+    this.db.query("DELETE FROM devices WHERE id = ?").run(id);
+  }
+
   setVoipToken(deviceId: string, token: string | null, environment: Device["environment"]) {
-    // Токен принадлежит одному устройству: при смене регистрации старая запись сбрасывается.
+    // A token belongs to one device, so changing accounts clears the old record.
     if (token) this.db.query("UPDATE devices SET voip_token = NULL WHERE voip_token = ? AND id != ?").run(token, deviceId);
     this.db.query("UPDATE devices SET voip_token = ?, environment = ? WHERE id = ?").run(token, environment, deviceId);
   }
@@ -202,14 +218,14 @@ export class Store {
     this.db.query("UPDATE devices SET voip_token = NULL WHERE voip_token = ?").run(token);
   }
 
-  // Боты
+  // Agents
 
-  addBot(opts: { deviceId: string; name: string; chatUrl?: string; chatKeyEnv?: string; chatModel?: string }) {
+  addBot(opts: { accountId: string; name: string }) {
     const id = randomUUID();
     const token = newToken("herb_bot");
     this.db
-      .query("INSERT INTO bots (id, device_id, name, token_hash, chat_url, chat_key_env, chat_model) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .run(id, opts.deviceId, opts.name, hashToken(token), opts.chatUrl ?? null, opts.chatKeyEnv ?? null, opts.chatModel ?? null);
+      .query("INSERT INTO bots (id, account_id, name, token_hash) VALUES (?, ?, ?, ?)")
+      .run(id, opts.accountId, opts.name, hashToken(token));
     return { id, token };
   }
 
@@ -221,34 +237,39 @@ export class Store {
     return this.db.query<Bot, [string]>(`SELECT ${BOT_COLUMNS} FROM bots WHERE id = ?`).get(id);
   }
 
-  botByName(deviceId: string, name: string) {
-    return this.db.query<Bot, [string, string]>(`SELECT ${BOT_COLUMNS} FROM bots WHERE device_id = ? AND name = ?`).get(deviceId, name);
+  botByName(accountId: string, name: string) {
+    return this.db.query<Bot, [string, string]>(`SELECT ${BOT_COLUMNS} FROM bots WHERE account_id = ? AND name = ?`).get(accountId, name);
   }
 
-  listBots(deviceId: string) {
-    return this.db.query<Bot, [string]>(`SELECT ${BOT_COLUMNS} FROM bots WHERE device_id = ? ORDER BY name`).all(deviceId);
+  listBots(accountId: string) {
+    return this.db.query<Bot, [string]>(`SELECT ${BOT_COLUMNS} FROM bots WHERE account_id = ? AND system = 0 ORDER BY name`).all(accountId);
   }
 
-  allBots() {
-    return this.db.query<Bot, []>(`SELECT ${BOT_COLUMNS} FROM bots ORDER BY device_id, name`).all();
+  countBots(accountId: string) {
+    return this.db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM bots WHERE account_id = ? AND system = 0").get(accountId)!.n;
   }
 
-  countBots(deviceId: string) {
-    return this.db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM bots WHERE device_id = ?").get(deviceId)!.n;
+  /** Created on the first test call. */
+  testAgent(accountId: string) {
+    const existing = this.db.query<Bot, [string]>(`SELECT ${BOT_COLUMNS} FROM bots WHERE account_id = ? AND system = 1`).get(accountId);
+    if (existing) return existing;
+    const { id } = this.addBot({ accountId, name: TEST_AGENT_NAME });
+    this.db.query("UPDATE bots SET system = 1 WHERE id = ?").run(id);
+    return this.bot(id)!;
   }
 
   setBotChat(id: string, chat: { url: string | null; keyEnv: string | null; model: string | null }) {
     this.db.query("UPDATE bots SET chat_url = ?, chat_key_env = ?, chat_model = ? WHERE id = ?").run(chat.url, chat.keyEnv, chat.model, id);
   }
 
-  /** Возвращает id звонков удалённого бота, чтобы убрать их аудио. */
+  /** Returns the removed agent's call ids so their audio can be deleted. */
   deleteBot(id: string) {
     const calls = this.db.query<{ id: string }, [string]>("SELECT id FROM calls WHERE bot_id = ?").all(id);
     this.db.query("DELETE FROM bots WHERE id = ?").run(id);
     return calls.map((c) => c.id);
   }
 
-  // Звонки
+  // Calls
 
   recentCallCount(botId: string, sinceMs: number) {
     return this.db
@@ -256,13 +277,13 @@ export class Store {
       .get(botId, sinceMs)!.n;
   }
 
-  deviceUsage(deviceId: string, sinceMs: number) {
+  accountUsage(accountId: string, sinceMs: number) {
     return this.db
       .query<{ calls: number; bytes: number | null }, [string, number]>(
         `SELECT count(*) AS calls, sum(c.audio_bytes) AS bytes FROM calls c JOIN bots b ON b.id = c.bot_id
-         WHERE b.device_id = ? AND c.created_at >= ?`,
+         WHERE b.account_id = ? AND c.created_at >= ?`,
       )
-      .get(deviceId, sinceMs)!;
+      .get(accountId, sinceMs)!;
   }
 
   callByIdempotencyKey(botId: string, key: string) {
@@ -296,22 +317,22 @@ export class Store {
     return this.db.query<Call, [string]>(`${CALL_SELECT} WHERE c.id = ?`).get(id);
   }
 
-  /** Звонок виден только владельцу бота. */
-  callForDevice(id: string, deviceId: string) {
-    return this.db.query<Call, [string, string]>(`${CALL_SELECT} WHERE c.id = ? AND b.device_id = ?`).get(id, deviceId);
+  /** A call is visible only to the agent's owner. */
+  callForAccount(id: string, accountId: string) {
+    return this.db.query<Call, [string, string]>(`${CALL_SELECT} WHERE c.id = ? AND b.account_id = ?`).get(id, accountId);
   }
 
-  listCalls(deviceId: string, limit: number, botId?: string) {
+  listCalls(accountId: string, limit: number, botId?: string) {
     return botId
-      ? this.db.query<Call, [string, string, number]>(`${CALL_SELECT} WHERE b.device_id = ? AND c.bot_id = ? ORDER BY c.created_at DESC LIMIT ?`).all(deviceId, botId, limit)
-      : this.db.query<Call, [string, number]>(`${CALL_SELECT} WHERE b.device_id = ? ORDER BY c.created_at DESC LIMIT ?`).all(deviceId, limit);
+      ? this.db.query<Call, [string, string, number]>(`${CALL_SELECT} WHERE b.account_id = ? AND c.bot_id = ? ORDER BY c.created_at DESC LIMIT ?`).all(accountId, botId, limit)
+      : this.db.query<Call, [string, number]>(`${CALL_SELECT} WHERE b.account_id = ? ORDER BY c.created_at DESC LIMIT ?`).all(accountId, limit);
   }
 
-  pendingCalls(deviceId: string) {
-    return this.db.query<Call, [string]>(`${CALL_SELECT} WHERE b.device_id = ? AND c.status = 'ringing' ORDER BY c.created_at`).all(deviceId);
+  pendingCalls(accountId: string) {
+    return this.db.query<Call, [string]>(`${CALL_SELECT} WHERE b.account_id = ? AND c.status = 'ringing' ORDER BY c.created_at`).all(accountId);
   }
 
-  /** Возвращает false, если переход недопустим (например, повтор после завершения). */
+  /** Returns false if the transition is not allowed, such as after the call ended. */
   transition(id: string, next: CallStatus, now: number) {
     const current = this.call(id);
     if (!current) return false;
@@ -327,7 +348,7 @@ export class Store {
       .run(now, now - RING_TIMEOUT_MS);
   }
 
-  /** Удаляет старые завершённые звонки и возвращает их id для очистки аудио. */
+  /** Deletes old finished calls and returns their ids for audio cleanup. */
   purgeOlderThan(cutoff: number) {
     const placeholders = TERMINAL.map(() => "?").join(",");
     const rows = this.db
@@ -343,29 +364,6 @@ export class Store {
       .query<{ id: string }, [number]>("SELECT id FROM calls WHERE audio_mime IS NOT NULL AND created_at < ?")
       .all(cutoff)
       .map((r) => r.id);
-  }
-
-  /** Брошенные аккаунты: телефон не подключил пуши и ботов нет. */
-  purgeAbandonedDevices(cutoff: number) {
-    this.db
-      .query(`DELETE FROM devices WHERE created_at > 0 AND created_at < ? AND voip_token IS NULL
-              AND id NOT IN (SELECT device_id FROM bots)`)
-      .run(cutoff);
-  }
-
-  // Коды подключения
-
-  addConnectCode(code: string, deviceId: string, expiresAt: number) {
-    this.db.query("DELETE FROM connect_codes WHERE device_id = ?").run(deviceId);
-    this.db.query("INSERT INTO connect_codes (code_hash, device_id, expires_at) VALUES (?, ?, ?)").run(hashToken(code), deviceId, expiresAt);
-  }
-
-  /** Одноразовый: код удаляется при успешной проверке. */
-  consumeConnectCode(code: string, now: number) {
-    const row = this.db
-      .query<{ device_id: string }, [string, number]>("DELETE FROM connect_codes WHERE code_hash = ? AND expires_at >= ? RETURNING device_id")
-      .get(hashToken(code), now);
-    return row?.device_id ?? null;
   }
 
   // OAuth
@@ -417,10 +415,10 @@ export class Store {
       .get(hash, now);
   }
 
-  purgeOAuth(now: number) {
+  purge(now: number) {
     this.db.query("DELETE FROM oauth_grants WHERE refresh_expires < ?").run(now);
-    this.db.query("DELETE FROM connect_codes WHERE expires_at < ?").run(now);
-    // Клиент зарегистрировался, но вход так и не завершил.
+    this.db.query("DELETE FROM sessions WHERE expires_at < ?").run(now);
+    // The client registered but never finished signing in.
     this.db.query("DELETE FROM oauth_clients WHERE created_at < ? AND id NOT IN (SELECT client_id FROM oauth_grants)").run(now - 24 * 60 * 60 * 1000);
   }
 }

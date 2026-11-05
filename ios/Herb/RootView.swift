@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 struct RootView: View {
@@ -5,13 +6,12 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        TabView {
-            AgentsView()
-                .tabItem { Label("Agents", systemImage: "bubble.left.and.bubble.right") }
-            CallsView(bot: nil)
-                .tabItem { Label("Calls", systemImage: "phone") }
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape") }
+        Group {
+            if model.connection == nil {
+                WelcomeView()
+            } else {
+                signedIn
+            }
         }
         .fullScreenCover(item: Binding(
             get: { model.callCenter.active },
@@ -19,14 +19,27 @@ struct RootView: View {
         )) { _ in
             ActiveCallView()
         }
-        .task(id: PollKey(active: scenePhase == .active, connected: model.connection != nil)) {
-            guard scenePhase == .active else { return }
-            guard model.connection != nil else {
-                await model.ensureAccount()
-                return
+        .task {
+            // Ask up front: there is no way to answer on the lock screen during a call.
+            if AVAudioApplication.shared.recordPermission == .undetermined {
+                _ = await AVAudioApplication.requestRecordPermission()
             }
+        }
+        .task(id: PollKey(active: scenePhase == .active, connected: model.connection != nil)) {
+            guard scenePhase == .active, model.connection != nil else { return }
             await model.refresh()
             await model.pollWhileActive()
+        }
+    }
+
+    private var signedIn: some View {
+        TabView {
+            AgentsView()
+                .tabItem { Label("Agents", systemImage: "bubble.left.and.bubble.right") }
+            CallsView(bot: nil)
+                .tabItem { Label("Calls", systemImage: "phone") }
+            SettingsView()
+                .tabItem { Label("Settings", systemImage: "gearshape") }
         }
     }
 
@@ -57,15 +70,12 @@ struct AgentsView: View {
             }
             .overlay {
                 if model.bots.isEmpty && model.errorMessage == nil {
-                    if model.connection == nil {
-                        ProgressView()
-                    } else {
-                        ContentUnavailableView {
-                            Label("No Agents", systemImage: "person.crop.circle.badge.plus")
-                        } actions: {
-                            Button("Connect Agent") { addingAgent = true }
-                                .buttonStyle(.borderedProminent)
-                        }
+                    ContentUnavailableView {
+                        Label("No Agents", systemImage: "person.crop.circle.badge.plus")
+                    } actions: {
+                        Button("Connect Agent") { addingAgent = true }
+                            .buttonStyle(.borderedProminent)
+                            .foregroundStyle(Color(.systemBackground))
                     }
                 }
             }
@@ -73,7 +83,6 @@ struct AgentsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Connect Agent", systemImage: "plus") { addingAgent = true }
-                        .disabled(model.connection == nil)
                 }
             }
             .navigationDestination(for: Bot.self) { bot in
@@ -83,10 +92,7 @@ struct AgentsView: View {
                     CallsView(bot: bot)
                 }
             }
-            .refreshable {
-                await model.ensureAccount()
-                await model.refresh()
-            }
+            .refreshable { await model.refresh() }
             .sheet(isPresented: $addingAgent) { ConnectAgentView() }
             .confirmationDialog(
                 "Remove \(pendingDelete?.name ?? "agent")?",
@@ -112,7 +118,7 @@ struct AgentRow: View {
         HStack(spacing: 12) {
             Text(bot.name.prefix(1).uppercased())
                 .font(.headline)
-                .foregroundStyle(.white)
+                .foregroundStyle(Color(.systemBackground))
                 .frame(width: 40, height: 40)
                 .background(Color.accentColor, in: Circle())
                 .accessibilityHidden(true)

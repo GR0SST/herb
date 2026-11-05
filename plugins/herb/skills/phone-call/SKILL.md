@@ -1,6 +1,6 @@
 ---
 name: phone-call
-description: Call the user's iPhone through Herb, either just ringing or speaking a message with the Lily voice. Use for "позвони мне", "набери", "скажи голосом", "разбуди звонком", "call me", or when a task the user asked to be alerted about needs a phone alert. Also use when setting up Herb or when its tools fail.
+description: Call the user's iPhone through Herb, either just ringing or speaking a message with the Lily voice. Use when the user asks to be called, or when something they asked to be alerted about needs an urgent phone alert, such as a production outage or a security finding. Also use when setting up Herb or when its tools fail.
 ---
 
 # Herb phone call
@@ -9,13 +9,13 @@ Rings the user's iPhone through the Herb app. Text is optional: without it the p
 
 ## First-time setup
 
-Each user has their own account, created automatically when they open the Herb app. The plugin needs no tokens in its files.
+The plugin needs no tokens in its files.
 
-1. Call `phone_call_status` or start the client's sign-in for the `herb` MCP server. A sign-in link opens in the browser.
-2. In the Herb app the user opens Agents, taps +, and gets a sign-in code. They enter the code and an agent name on the page. The agent then appears in the app.
-3. Never ask for codes or tokens in chat. The user types them only on the sign-in page.
+1. Start the client's sign-in for the `herb` MCP server. A sign-in page opens in the browser.
+2. On that page the user signs in with their account key or creates an account, then taps Connect. The agent appears in their account at https://herb.grosst.cc.
+3. Never ask for the account key or tokens in chat. The user types them only on the sign-in page.
 
-If the user has no Herb app, tell them to install it first and stop: there is nothing you can do from here. Clients without browser sign-in can use an API token from the same screen in the app, sent as `Authorization: Bearer <token>`.
+To ring, the user also needs the Herb app on their iPhone, signed in with the same account key. If `push` is `no_device`, tell them to do that. Clients without browser sign-in can use an API token from the website, sent as `Authorization: Bearer <token>`.
 
 ## When to call
 
@@ -26,7 +26,7 @@ Call only when the user asked for it or set up the rule in advance. Never call o
 1. To just ring, call `phone_call` with no text. Add a short `title` when it helps.
 2. To speak, write the message for listening: short, plain sentences, up to 2000 characters. Prepare it by the rules in the next section.
 3. Pass `text` with `language` (`ru`, `uk`, `en`...). Without `language` the phone guesses it from the text, so always pass it.
-4. Use one stable `idempotency_key` per event, such as `wake-2026-11-05`. Reuse the same key when you retry after a network error, so the phone does not ring twice.
+4. Use one stable `idempotency_key` per event, such as `incident-2291`. Reuse the same key when you retry after a network error, so the phone does not ring twice.
 5. Check the result with `phone_call_status`. A call rings for up to 60 seconds.
 
 ## Preparing text for speech
@@ -66,6 +66,7 @@ Do not claim the message was heard unless the user confirms it. Do not redial af
 
 | Result | Meaning | What to do |
 | --- | --- | --- |
+| `push: "no_device"` | No phone is signed in to this account | Tell the user to sign in to the Herb app with their account key |
 | `push: "disabled"` | The server has no push key | The phone rings only while the app is open. Tell the user |
 | `push: "failed"` | The push did not reach the phone | Same. Ask the user to open the app once, so it re-registers |
 | `daily_limit` | The account reached its daily limit | Tell the user. Try again tomorrow |
