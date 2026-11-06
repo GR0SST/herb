@@ -202,6 +202,7 @@ main { flex: 1; width: 100%; max-width: 1080px; margin-inline: auto; padding-inl
 .faq p { margin-top: 8px; }
 
 .final { align-items: center; text-align: center; padding-block: 96px; }
+.final-actions { justify-content: center; }
 
 /* Scroll reveal */
 /* Only when the script runs, so content stays visible without it. */
