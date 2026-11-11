@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var showKey = false
     @State private var copied = false
     @State private var error: String?
+    @AppStorage(CallCenter.autoHangUpKey) private var autoHangUp = true
 
     var body: some View {
         NavigationStack {
@@ -40,6 +41,11 @@ struct SettingsView: View {
                         }
                         .foregroundStyle(.primary)
                     }
+                }
+                Section {
+                    Toggle("Auto Hang Up", isOn: $autoHangUp)
+                } footer: {
+                    Text("When off, a call stays open after the message until you hang up.")
                 }
                 Section {
                     Button("Sign Out") { confirmSignOut = true }

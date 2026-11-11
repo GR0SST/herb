@@ -113,6 +113,7 @@ struct ActiveCallView: View {
         case .ringing: "Calling…"
         case .connecting: "Connecting…"
         case .playing: "Speaking"
+        case .waiting(let note): note
         case .ended(let note): note
         }
     }
@@ -129,7 +130,7 @@ struct ActiveCallView: View {
                     model.callCenter.answer(session.id)
                 }
             }
-        case .connecting, .playing:
+        case .connecting, .playing, .waiting:
             CallButton(title: "End", systemImage: "phone.down.fill", color: .red) {
                 model.callCenter.end(session.id)
             }

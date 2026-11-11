@@ -6,6 +6,8 @@ import PushKit
 struct CallSession: Identifiable, Equatable {
     enum Phase: Equatable {
         case ringing, connecting, playing
+        /// The message is over, but the line stays open until the person hangs up.
+        case waiting(String)
         case ended(String)
     }
 
@@ -43,6 +45,13 @@ final class CallCenter: NSObject {
     }
 
     private static let ringTimeout: Duration = .seconds(60)
+
+    static let autoHangUpKey = "autoHangUp"
+
+    /// When off, a call stays open after the message until the person hangs up.
+    private var autoHangUp: Bool {
+        UserDefaults.standard.object(forKey: Self.autoHangUpKey) as? Bool ?? true
+    }
 
     #if targetEnvironment(simulator)
     private let useCallKit = false
@@ -183,8 +192,7 @@ final class CallCenter: NSObject {
                 pending = (id, .text(text, language: record.language))
             } else {
                 // A call without a message: answering is enough.
-                finish(id, relayStatus: nil, note: "Answered")
-                endSystemCall(id)
+                complete(id, relayStatus: nil, note: "Answered")
                 return
             }
             playIfReady()
@@ -209,11 +217,10 @@ final class CallCenter: NSObject {
         let done: (Bool, Bool) -> Void = { [weak self] success, _ in
             guard let self else { return }
             if success {
-                self.finish(id, relayStatus: .played)
+                self.complete(id, relayStatus: .played)
             } else {
-                self.finish(id, relayStatus: .failed, note: "Could not play the message")
+                self.finishAfterFailure(id, "Could not play the message")
             }
-            self.endSystemCall(id)
         }
         switch message {
         case .text(let text, let language):
@@ -235,9 +242,27 @@ final class CallCenter: NSObject {
         case .connecting, .playing:
             // Answered but not heard to the end, so the status stays answered.
             finish(id, relayStatus: nil, note: "Ended")
+        case .waiting(let note):
+            finish(id, relayStatus: nil, note: note)
         case .ended:
             break
         }
+    }
+
+    /// The message was delivered: hang up, or keep the line open if auto hang up is off.
+    private func complete(_ id: UUID, relayStatus: CallStatus?, note: String? = nil) {
+        guard autoHangUp else {
+            guard let session = sessions[id] else { return }
+            if case .ended = session.phase { return }
+            player.stop()
+            sessions[id]?.phase = .waiting(note ?? relayStatus?.label ?? "Ended")
+            if let relayStatus, let api = api() {
+                Task { try? await api.setStatus(callID: id, relayStatus) }
+            }
+            return
+        }
+        finish(id, relayStatus: relayStatus, note: note)
+        endSystemCall(id)
     }
 
     private func finishAfterFailure(_ id: UUID, _ note: String) {
