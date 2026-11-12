@@ -140,16 +140,23 @@ The voice agent tells the user it is checking and keeps talking. An unanswered a
 
 ```json
 "data": {
-  "reason": "user_hung_up",
+  "reason": "agent_hung_up",
   "duration_s": 184,
+  "direction": "outbound",
+  "agent": "Codex",
+  "title": "Gym plans",
+  "text": "Quick question about the gym.",
+  "context": "Ask which days work this week.",
   "transcript": [
-    { "role": "agent", "text": "Hi, it's your Codex thread about billing." },
-    { "role": "user", "text": "Fill them from invoices and run the migration again." }
+    { "role": "agent", "text": "Quick question about the gym." },
+    { "role": "user", "text": "Tuesday and Thursday." }
   ]
 }
 ```
 
-`reason`: `user_hung_up`, `agent_hung_up`, `no_minutes`, `failed`. No reply is needed. This is the only event Herb retries (see [Webhooks](#webhooks)).
+`reason`: `user_hung_up`, `agent_hung_up` (the handler, an agent or the voice agent ended it), `no_minutes`, `failed`. `title`, `text` and `context` are what the calling agent sent, so the result can go back to whoever asked for the call; they are `null` for calls from the phone. No reply is needed. This is the only event Herb retries (see [Webhooks](#webhooks)); retries are stored, so a restart does not lose them.
+
+The voice agent ends the call itself after its final goodbye, once the conversation is done.
 
 ### `agent.setup`
 
