@@ -1,6 +1,6 @@
 # Herb plugin
 
-Lets an agent call your iPhone: `phone_call`, `phone_call_status`, and instructions for when and how to call.
+Lets an agent call your iPhone: `phone_call`, `phone_call_status`, and instructions for when and how to call. In live two-way calls the agent answers the user with `live_call_reply`, `live_call_context`, `live_call_status` and `live_call_hang_up`. See [live calls](../../docs/live-calls.md).
 
 ## Connect
 
