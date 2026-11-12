@@ -425,7 +425,16 @@ describe("during a call", () => {
     expect(stored).toMatchObject({ status: "ended", live: true, ended_reason: "agent_hung_up", duration_s: 62 });
     await flush();
     const ended = hits.find((h) => h.event.type === "call.ended")!;
-    expect(ended.event.data).toEqual({ reason: "agent_hung_up", duration_s: 62, transcript: [{ role: "agent", text: "Hi" }] });
+    expect(ended.event.data).toEqual({
+      reason: "agent_hung_up",
+      duration_s: 62,
+      direction: "inbound",
+      agent: "Codex",
+      title: null,
+      text: null,
+      context: null,
+      transcript: [{ role: "agent", text: "Hi" }],
+    });
     expect((await req(`/v1/calls/${callId}/say`, botToken, { body: { text: "late" } })).status).toBe(409);
   });
 
@@ -441,8 +450,30 @@ describe("during a call", () => {
     hookReply = (hit) => (hit.event.type === "call.ended" && ++attempts === 1 ? new Response(null, { status: 503 }) : new Response(null, { status: 204 }));
     call.controls.end("user_hung_up");
     await flush();
+    expect(attempts).toBe(1);
+    // The retry is stored and sent by the periodic tick, so it survives a restart.
+    expect(store.dueEvents(clock)).toHaveLength(1);
+    app.tick();
     await flush();
     expect(attempts).toBe(2);
+    expect(store.dueEvents(clock)).toHaveLength(0);
+  });
+
+  test("an agent's call tells the handler what it was about", async () => {
+    await req(`/v1/calls/${callId}/hangup`, botToken, { body: {} });
+    const placed = (await (await req("/v1/call", botToken, {
+      body: { live: true, title: "Gym plans", text: "Quick question about the gym", context: "Ask which days work" },
+    })).json()) as { id: string };
+    await req(`/v1/calls/${placed.id}/live`, devToken, { body: {} });
+    hits = [];
+    await req(`/v1/calls/${placed.id}/end`, devToken, { body: {} });
+    await flush();
+    expect(hits.find((h) => h.event.type === "call.ended")!.event.data).toMatchObject({
+      direction: "outbound",
+      title: "Gym plans",
+      text: "Quick question about the gym",
+      context: "Ask which days work",
+    });
   });
 });
 

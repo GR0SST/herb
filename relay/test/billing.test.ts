@@ -52,8 +52,10 @@ function transaction(fields: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+let usageReport: ((seconds: number) => void) | null = null;
 const voice: VoiceEngine = {
-  async open() {
+  async open({ controls }) {
+    usageReport = controls.usage;
     return { client: {}, session: { say() {}, addContext() {}, answer() {}, askExpired() {}, hangup() {} } };
   },
 };
@@ -143,6 +145,9 @@ describe("subscription", () => {
     clock += 90_000;
     await req(`/v1/calls/${started.call.id}/end`, phone, {});
     expect(await live()).toMatchObject({ seconds_left: 5910, subscription: { seconds_used: 90 } });
+    // The provider billed 104 seconds in all: the difference is charged too.
+    usageReport!(104);
+    expect(await live()).toMatchObject({ seconds_left: 5896, subscription: { seconds_used: 104 } });
   });
 
   test("renewal starts a new period; the same transaction again changes nothing", async () => {

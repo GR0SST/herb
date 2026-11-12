@@ -190,6 +190,14 @@ export class Store {
       updated_at INTEGER NOT NULL
     )`);
     this.db.run("CREATE INDEX IF NOT EXISTS subscriptions_account ON subscriptions(account_id)");
+    // Events to send again, kept here so a restart does not lose them.
+    this.db.run(`CREATE TABLE IF NOT EXISTS event_outbox (
+      id TEXT PRIMARY KEY,
+      bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      attempt INTEGER NOT NULL,
+      next_at INTEGER NOT NULL
+    )`);
     this.db.run(`CREATE TABLE IF NOT EXISTS oauth_clients (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, redirect_uris TEXT NOT NULL, created_at INTEGER NOT NULL
     )`);
@@ -473,6 +481,27 @@ export class Store {
       .query(`INSERT INTO live_balance (account_id, seconds, unlimited) VALUES (?, 0, ?)
               ON CONFLICT (account_id) DO UPDATE SET unlimited = excluded.unlimited`)
       .run(accountId, unlimited ? 1 : 0);
+  }
+
+  // Event retries
+
+  queueEvent(id: string, botId: string, body: string, attempt: number, nextAt: number) {
+    this.db
+      .query(`INSERT INTO event_outbox (id, bot_id, body, attempt, next_at) VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT (id) DO UPDATE SET attempt = excluded.attempt, next_at = excluded.next_at`)
+      .run(id, botId, body, attempt, nextAt);
+  }
+
+  dueEvents(now: number) {
+    return this.db
+      .query<{ id: string; bot_id: string; body: string; attempt: number }, [number]>(
+        "SELECT id, bot_id, body, attempt FROM event_outbox WHERE next_at <= ? ORDER BY next_at LIMIT 20",
+      )
+      .all(now);
+  }
+
+  dropEvent(id: string) {
+    this.db.query("DELETE FROM event_outbox WHERE id = ?").run(id);
   }
 
   // Subscriptions

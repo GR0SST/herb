@@ -27,7 +27,20 @@ You always speak first: the moment the call connects, open the conversation with
 Keep replies short and spoken, one or two sentences. Never read out code, links or long lists.
 When the user asks something you cannot answer from the context below, or asks for any action, delegate it to the main agent and keep talking while it works.
 Never claim an action succeeded until the main agent says so.
-If the main agent gave you a goal for this call, work towards it: ask what you need, clarify, and confirm before you finish. Everything said is sent back to the main agent after the call.`;
+If the main agent gave you a goal for this call, work towards it: ask what you need, clarify, and confirm before you finish. Everything said is sent back to the main agent after the call.
+When the conversation is done, or the user says goodbye, say a short goodbye. The call ends on its own after your goodbye, so never say goodbye while you still expect an answer.`;
+
+/** Asked after the voice agent speaks: when it is true, the voice agent has ended the conversation and Herb hangs up. */
+const CALL_FINISHED = {
+  type: "predicate",
+  name: "call_finished",
+  instructions:
+    "This is a phone call between a voice assistant and a user. Answer true only if the assistant's latest words are a final goodbye that closes the call, such as \"Thanks, bye!\", said when the conversation is finished. Answer false if the assistant asked something, is waiting for an answer, is still working on something, or only said thanks without ending the call.",
+};
+/** How sure the check must be before Herb hangs up. */
+const FINISHED_PROBABILITY = 0.8;
+/** Hang up only after the voice agent has been quiet this long, so the goodbye is heard in full. */
+const QUIET_BEFORE_HANGUP_MS = 1_500;
 
 /** The parts of a WebSocket the engine needs, so tests can fake it. */
 export interface Socket {
@@ -88,6 +101,7 @@ export function createGptLive(options: GptLiveOptions): VoiceEngine {
             instructions: buildInstructions(setup),
             audio: { output: { voice: options.voice ?? "marin" } },
             delegation: { type: "client" },
+            triggers: [{ type: "decisions", event_type: "session.output_transcript.delta", decisions: { questions: [CALL_FINISHED] } }],
             client: {
               data_channel: {
                 allowed_client_events: [],
@@ -139,7 +153,12 @@ export function attach(socket: Socket, setup: CallSetup, controls: CallControls,
     if (speaker && line.trim()) controls.transcript({ role: speaker, text: line });
     line = "";
   };
+  let lastAgentSpeech = 0;
+  let userSpoke = false;
+  let hangingUp = false;
   const hear = (role: TranscriptLine["role"], delta: string) => {
+    if (role === "agent") lastAgentSpeech = Date.now();
+    else if (delta.trim()) userSpoke = true;
     if (speaker !== role) {
       flushLine();
       speaker = role;
@@ -190,6 +209,25 @@ export function attach(socket: Socket, setup: CallSetup, controls: CallControls,
         : `Start the call now, in the language set above: greet the user in one short sentence as ${setup.agent} and ask how you can help.`);
   };
 
+  /** The voice agent said goodbye: wait for it to finish speaking, then hang up. */
+  const endByAgent = () => {
+    // A goodbye before the user said anything is not the end of a conversation.
+    if (hangingUp || closing || ended || !userSpoke) return;
+    hangingUp = true;
+    const wait = () => {
+      if (closing || ended) return;
+      const quiet = Date.now() - lastAgentSpeech;
+      if (quiet < QUIET_BEFORE_HANGUP_MS) {
+        setTimeout(wait, QUIET_BEFORE_HANGUP_MS - quiet);
+        return;
+      }
+      if (debug) console.log("gpt-live voice agent ended the call");
+      finish("agent_hung_up");
+      close();
+    };
+    wait();
+  };
+
   socket.addEventListener("open", () => {
     open = true;
     setTimeout(ready, START_FALLBACK_MS);
@@ -206,7 +244,7 @@ export function attach(socket: Socket, setup: CallSetup, controls: CallControls,
       seen.add(event.event_id);
     }
     if (debug && !String(event.type).endsWith("audio.delta") && !String(event.type).endsWith("audio.append")) {
-      const extra = event.type === "session.delegation.created" || event.type === "session.closed" || event.type === "error"
+      const extra = ["session.delegation.created", "session.closed", "error", "decision.event"].includes(String(event.type))
         ? ` ${JSON.stringify(event).slice(0, 400)}`
         : "";
       console.log(`gpt-live < ${String(event.type)}${extra}`);
@@ -226,10 +264,20 @@ export function attach(socket: Socket, setup: CallSetup, controls: CallControls,
         if (delegation?.id) void delegate(delegation.id);
         break;
       }
-      case "session.closed":
+      case "decision.event": {
+        const answers = ((event.event as { decision?: { answers?: { name?: string; probability?: number }[] } })?.decision?.answers) ?? [];
+        const finished = answers.find((a) => a.name === CALL_FINISHED.name);
+        if (finished && (finished.probability ?? 0) >= FINISHED_PROBABILITY) endByAgent();
+        break;
+      }
+      case "session.closed": {
         finish(closing ? "agent_hung_up" : event.reason === "connection_lost" ? "failed" : "user_hung_up");
+        // What the provider billed, which runs a little past the conversation.
+        const seconds = (event.usage as { seconds?: number } | undefined)?.seconds;
+        if (typeof seconds === "number") controls.usage(seconds);
         socket.close();
         break;
+      }
       case "error":
         console.error(`gpt-live error: ${JSON.stringify(event.error ?? event).slice(0, 300)}`);
         break;

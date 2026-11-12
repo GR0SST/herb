@@ -24,6 +24,8 @@ export interface CallControls {
   ask(question: string): Promise<AskResult>;
   transcript(line: TranscriptLine): void;
   end(reason: EndReason): void;
+  /** The provider's final count of billed seconds, which can come after the end. */
+  usage(seconds: number): void;
 }
 
 /** Connects a phone to a speech model. GPT-Live in production, a fake in tests. */
@@ -261,11 +263,14 @@ export function createLive(options: LiveOptions) {
     }
   }
 
-  /** A connected listener wins over the webhook. */
-  function deliver(bot: Bot, event: Event, timeoutMs: number): Promise<Delivery> {
+  /** A connected listener wins over the webhook. Each delivery is logged, without its content. */
+  async function deliver(bot: Bot, event: Event, timeoutMs: number): Promise<Delivery> {
     const listener = listeners.get(bot.id);
-    if (listener) return viaListener(listener, bot.id, event, timeoutMs);
-    return viaWebhook(bot, event, timeoutMs);
+    const started = Date.now();
+    const result = listener ? await viaListener(listener, bot.id, event, timeoutMs) : await viaWebhook(bot, event, timeoutMs);
+    const outcome = result.reached ? (result.reply ? "replied" : "delivered") : `failed: ${result.error ?? "unknown"}`;
+    console.log(`event ${event.type} ${event.id} agent=${bot.id.slice(0, 8)} via=${listener ? "listener" : "webhook"} ${outcome} ${Date.now() - started}ms`);
+    return result;
   }
 
   function event(live: LiveCall, type: Event["type"], data: Record<string, unknown>): Event {
@@ -287,17 +292,40 @@ export function createLive(options: LiveOptions) {
   }
 
   /** The only event worth retrying: the moment of the others is gone by then. */
-  function deliverEnded(bot: Bot, ended: Event, attempt = 0) {
-    void deliver(bot, ended, LIVE_TIMEOUTS.ended).then(({ reached }) => {
-      const delay = retryDelays[attempt];
-      if (reached || delay === undefined || listeners.has(bot.id) || !bot.webhook_url) return;
-      const timer = setTimeout(() => {
-        // The agent may have been deleted or its webhook changed in the meantime.
-        const fresh = store.bot(bot.id);
-        if (fresh?.webhook_url === bot.webhook_url) deliverEnded(fresh, ended, attempt + 1);
-      }, delay);
-      (timer as { unref?: () => void }).unref?.();
-    });
+  /** Retries are stored, so they survive a restart. */
+  async function deliverEnded(bot: Bot, ended: Event, attempt = 0) {
+    // Nothing to deliver to: no point in trying again.
+    if (!bot.webhook_url && !listeners.has(bot.id)) {
+      store.dropEvent(ended.id);
+      return;
+    }
+    const { reached } = await deliver(bot, ended, LIVE_TIMEOUTS.ended);
+    const delay = retryDelays[attempt];
+    if (reached || delay === undefined) {
+      store.dropEvent(ended.id);
+      if (!reached) console.error(`event ${ended.type} ${ended.id} dropped after ${attempt + 1} attempts`);
+      return;
+    }
+    store.queueEvent(ended.id, bot.id, JSON.stringify(ended), attempt + 1, now() + delay);
+  }
+
+  let retrying = false;
+  /** Sends stored events that are due. Run every few seconds. */
+  async function retryEvents() {
+    if (retrying) return;
+    retrying = true;
+    try {
+      for (const row of store.dueEvents(now())) {
+        const bot = store.bot(row.bot_id);
+        if (!bot) {
+          store.dropEvent(row.id);
+          continue;
+        }
+        await deliverEnded(bot, JSON.parse(row.body) as Event, row.attempt);
+      }
+    } finally {
+      retrying = false;
+    }
   }
 
   // Calls
@@ -399,7 +427,31 @@ export function createLive(options: LiveOptions) {
     const duration = Math.max(0, Math.ceil((now() - live.startedAt) / 1000));
     minutes.spend(live.bot.account_id, duration);
     store.endLiveCall(callId, reason, duration, now(), live.transcript);
-    deliverEnded(live.bot, event(live, "call.ended", { reason, duration_s: duration, transcript: live.transcript }));
+    charged.set(callId, { accountId: live.bot.account_id, seconds: duration, at: now() });
+    const { call } = live;
+    void deliverEnded(live.bot, event(live, "call.ended", {
+      reason,
+      duration_s: duration,
+      direction: live.direction,
+      agent: live.bot.name,
+      // What the call was about, so the handler can return the result to whoever asked for it.
+      title: call.title,
+      text: call.text,
+      context: call.live_context,
+      transcript: live.transcript,
+    }));
+  }
+
+  /** Seconds charged per ended call, until the provider's final count arrives. */
+  const charged = new Map<string, { accountId: string; seconds: number; at: number }>();
+
+  /** The provider bills from session start to close: charge the difference, so minutes match the real cost. */
+  function usage(callId: string, seconds: number) {
+    const entry = charged.get(callId);
+    if (!entry) return;
+    charged.delete(callId);
+    const extra = Math.ceil(seconds) - entry.seconds;
+    if (extra > 0) minutes.spend(entry.accountId, extra);
   }
 
   /** Ends a call from our side: the voice agent is told to stop. */
@@ -415,11 +467,14 @@ export function createLive(options: LiveOptions) {
       ask: (question) => ask(callId, question),
       transcript: (line) => transcript(callId, line),
       end: (reason) => end(callId, reason),
+      usage: (seconds) => usage(callId, seconds),
     };
   }
 
   /** Ends calls that ran out of minutes and drops asks nobody answered. Run every few seconds. */
   function tick() {
+    void retryEvents();
+    for (const [id, entry] of charged) if (now() - entry.at > 10 * 60_000) charged.delete(id);
     for (const [id, live] of [...calls]) {
       if (live.budget !== null && now() - live.startedAt >= live.budget * 1000) {
         hangup(id, "no_minutes");
