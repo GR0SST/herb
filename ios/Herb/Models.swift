@@ -54,12 +54,14 @@ struct CallRecord: Codable, Identifiable, Hashable {
     let status: CallStatus
     /// A two-way call. Missing on older servers.
     let live: Bool?
+    /// The user called the agent. Missing on older servers.
+    let outgoing: Bool?
     let createdAt: Double
 
     var date: Date { Date(timeIntervalSince1970: createdAt / 1000) }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, text, language, status, live
+        case id, title, text, language, status, live, outgoing
         case botId = "bot_id"
         case botName = "bot_name"
         case hasAudio = "has_audio"

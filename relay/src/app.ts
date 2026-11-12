@@ -90,6 +90,8 @@ const publicCall = (call: Call) => ({
   has_audio: call.audio_mime !== null,
   status: call.status,
   live: call.live === 1,
+  /** The user called the agent, rather than the agent calling the user. */
+  outgoing: call.from_phone === 1,
   ...(call.live
     ? { ended_reason: call.ended_reason, duration_s: call.duration_s, transcript: call.transcript ? (JSON.parse(call.transcript) as unknown[]) : null }
     : {}),

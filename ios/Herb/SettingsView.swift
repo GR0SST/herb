@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UIKit
 
@@ -95,10 +96,12 @@ struct SettingsView: View {
     }
 }
 
-/// Download or remove the on-device voice.
+/// Download, choose and remove the on-device voice.
 private struct VoiceSection: View {
     private var voice = VoiceModel.shared
+    @AppStorage(SpeechVoice.storageKey) private var selected = SpeechVoice.all[0].id
     @State private var confirmDelete = false
+    @State private var preview = VoicePreview()
 
     var body: some View {
         Section {
@@ -116,7 +119,12 @@ private struct VoiceSection: View {
                     .font(.subheadline)
                 }
             case .ready:
-                LabeledContent("On-Device Voice", value: "Downloaded")
+                ForEach(SpeechVoice.all) { option in
+                    VoiceRow(option: option, selected: selected == option.id, playing: preview.playing == option.id) {
+                        selected = option.id
+                        preview.play(option)
+                    }
+                }
                 Button("Delete Voice", role: .destructive) { confirmDelete = true }
             case .failed(let message):
                 Text(message).foregroundStyle(.red)
@@ -125,12 +133,69 @@ private struct VoiceSection: View {
         } header: {
             Text("Voice")
         } footer: {
-            Text("Lily reads messages on your iPhone, \(ByteCountFormatter.string(fromByteCount: VoiceModel.totalBytes, countStyle: .file)). Without it, the iOS voice reads them.")
+            Text("Messages are read on your iPhone with the voice you choose, \(ByteCountFormatter.string(fromByteCount: VoiceModel.totalBytes, countStyle: .file)). Without it, the iOS voice reads them.")
         }
         .confirmationDialog("Delete the voice?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete Voice", role: .destructive) { voice.delete() }
+            Button("Delete Voice", role: .destructive) {
+                preview.stop()
+                voice.delete()
+            }
         } message: {
             Text("Messages will be read with the iOS voice until you download it again.")
         }
+        .onDisappear { preview.stop() }
+    }
+}
+
+private struct VoiceRow: View {
+    let option: SpeechVoice
+    let selected: Bool
+    let playing: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option.name).foregroundStyle(.primary)
+                    Text(option.detail).font(.footnote).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if playing {
+                    Image(systemName: "speaker.wave.2.fill").foregroundStyle(.secondary)
+                }
+                if selected {
+                    Image(systemName: "checkmark").foregroundStyle(Color.accentColor).fontWeight(.semibold)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// Plays a short sample when a voice is picked.
+@MainActor
+@Observable
+private final class VoicePreview {
+    private(set) var playing: String?
+    @ObservationIgnored private let player = MessagePlayer()
+
+    func play(_ voice: SpeechVoice) {
+        player.stop()
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        let id = UUID()
+        let text = "Hi, I'm \(voice.name). This is how your agents will sound."
+        playing = voice.id
+        player.prepareSpeech(id: id, text: text, language: "en")
+        player.speak(id: id, text: text, language: "en", onFirstAudio: {}) { [weak self] _, _ in
+            if self?.playing == voice.id { self?.playing = nil }
+        }
+    }
+
+    func stop() {
+        player.stop()
+        playing = nil
     }
 }

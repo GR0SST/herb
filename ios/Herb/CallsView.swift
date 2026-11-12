@@ -40,11 +40,12 @@ struct CallRow: View {
     let showAgent: Bool
 
     private var icon: (name: String, color: Color) {
+        let arrow = record.outgoing == true ? "phone.arrow.up.right" : "phone.arrow.down.left"
         switch record.status {
-        case .played, .answered, .ended: ("phone.arrow.down.left", .green)
-        case .ringing: ("phone.badge.waveform", .accentColor)
-        case .declined: ("phone.down", .secondary)
-        case .missed, .failed: ("phone.arrow.down.left", .red)
+        case .played, .answered, .ended: return (arrow, .green)
+        case .ringing: return ("phone.badge.waveform", .accentColor)
+        case .declined: return ("phone.down", .secondary)
+        case .missed, .failed: return (arrow, .red)
         }
     }
 

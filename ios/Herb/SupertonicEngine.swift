@@ -1,20 +1,19 @@
 import Foundation
 import OnnxRuntimeBindings
 
-/// Supertonic 3 on the phone: Lily voice (F2), speed 1.2, with few steps for speed.
+/// Supertonic 3 on the phone: the chosen voice (Lily by default), speed 1.2, with few steps for speed.
 /// All work runs on one queue: ONNX sessions must not run while being unloaded.
 final class SupertonicEngine: @unchecked Sendable {
     static let shared = SupertonicEngine()
 
     private static let steps = 8
     private static let speed: Float = 1.2
-    private static let voice = "F2"
     private static let pauseBetweenPhrases: Float = 0.25
     /// Short phrases give a fast first sound. This is a limit, not an exact length.
     private static let maxPhraseLength = 140
 
     private let queue = DispatchQueue(label: "cc.grosst.herb.supertonic", qos: .userInitiated)
-    private var loaded: (env: ORTEnv, tts: TextToSpeech, style: Style)?
+    private var loaded: (env: ORTEnv, tts: TextToSpeech, style: Style, voice: String)?
 
     /// Cancellation flag, checked between phrases.
     final class Job: @unchecked Sendable {
@@ -40,16 +39,22 @@ final class SupertonicEngine: @unchecked Sendable {
     }
 
     private func engine() throws -> (env: ORTEnv, tts: TextToSpeech, style: Style) {
-        if let loaded { return loaded }
+        let voice = SpeechVoice.selected.id
         // Downloaded in Settings. Without it the iOS voice speaks.
         guard VoiceModel.isInstalled else { throw APIError.message("The voice is not downloaded") }
         let root = VoiceModel.directory.path
+        if let loaded {
+            if loaded.voice == voice { return (loaded.env, loaded.tts, loaded.style) }
+            // Another voice was chosen: only the small style file changes.
+            let style = try loadVoiceStyle(["\(root)/\(voice).json"], verbose: false)
+            self.loaded = (loaded.env, loaded.tts, style, voice)
+            return (loaded.env, loaded.tts, style)
+        }
         let env = try ORTEnv(loggingLevel: .warning)
         let tts = try loadTextToSpeech(root, false, env)
-        let style = try loadVoiceStyle(["\(root)/\(Self.voice).json"], verbose: false)
-        let value = (env, tts, style)
-        loaded = value
-        return value
+        let style = try loadVoiceStyle(["\(root)/\(voice).json"], verbose: false)
+        loaded = (env, tts, style, voice)
+        return (env, tts, style)
     }
 
     /// Generates phrases in order. onPhrase fires after each one, so sound plays while the rest is computed.

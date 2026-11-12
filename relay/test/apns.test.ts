@@ -9,7 +9,7 @@ const keyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 const device: Device = { id: "d", account_id: "a", name: "iPhone", voip_token: "abc123", environment: "sandbox", created_at: 1 };
 const call: Call = {
   id: "call-1", bot_id: "b", bot_name: "Grok", title: null, text: "secret text", language: "ru", audio_mime: null,
-  status: "ringing", live: 0, ended_reason: null, duration_s: null, live_context: null, transcript: null, created_at: 1, updated_at: 1,
+  status: "ringing", live: 0, ended_reason: null, duration_s: null, live_context: null, transcript: null, from_phone: 0, created_at: 1, updated_at: 1,
 };
 
 test("JWT is a verifiable ES256 token", () => {

@@ -2,6 +2,34 @@ import CryptoKit
 import Foundation
 import Observation
 
+/// A Supertonic voice style. Lily is the default.
+struct SpeechVoice: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let detail: String
+
+    static let all: [SpeechVoice] = [
+        SpeechVoice(id: "F2", name: "Lily", detail: "Bright"),
+        SpeechVoice(id: "F1", name: "Sarah", detail: "Calm, low"),
+        SpeechVoice(id: "F3", name: "Jessica", detail: "Clear"),
+        SpeechVoice(id: "F4", name: "Olivia", detail: "Crisp"),
+        SpeechVoice(id: "F5", name: "Emily", detail: "Kind"),
+        SpeechVoice(id: "M1", name: "Alex", detail: "Lively"),
+        SpeechVoice(id: "M2", name: "James", detail: "Deep"),
+        SpeechVoice(id: "M3", name: "Robert", detail: "Polished"),
+        SpeechVoice(id: "M4", name: "Sam", detail: "Soft"),
+        SpeechVoice(id: "M5", name: "Daniel", detail: "Warm"),
+    ]
+
+    static let storageKey = "voice"
+
+    /// The chosen voice, read on every message.
+    static var selected: SpeechVoice {
+        let id = UserDefaults.standard.string(forKey: storageKey)
+        return all.first { $0.id == id } ?? all[0]
+    }
+}
+
 /// The on-device Supertonic voice, downloaded on request so the app stays small.
 /// Without it, calls speak with the iOS voice.
 @MainActor
@@ -36,7 +64,16 @@ final class VoiceModel {
              sha256: "085de76dd8e8d5836d6ca66826601f615939218f90e519f70ee8a36ed2a4c4ba"),
         File(path: "onnx/tts.json", name: "tts.json", size: 8_253, sha256: nil),
         File(path: "onnx/unicode_indexer.json", name: "unicode_indexer.json", size: 277_676, sha256: nil),
+        File(path: "voice_styles/F1.json", name: "F1.json", size: 292_046, sha256: nil),
         File(path: "voice_styles/F2.json", name: "F2.json", size: 292_423, sha256: nil),
+        File(path: "voice_styles/F3.json", name: "F3.json", size: 290_794, sha256: nil),
+        File(path: "voice_styles/F4.json", name: "F4.json", size: 291_808, sha256: nil),
+        File(path: "voice_styles/F5.json", name: "F5.json", size: 291_479, sha256: nil),
+        File(path: "voice_styles/M1.json", name: "M1.json", size: 291_748, sha256: nil),
+        File(path: "voice_styles/M2.json", name: "M2.json", size: 292_055, sha256: nil),
+        File(path: "voice_styles/M3.json", name: "M3.json", size: 290_198, sha256: nil),
+        File(path: "voice_styles/M4.json", name: "M4.json", size: 291_522, sha256: nil),
+        File(path: "voice_styles/M5.json", name: "M5.json", size: 291_469, sha256: nil),
         File(path: "LICENSE", name: "Supertonic-Model-LICENSE.txt", size: 15_007, sha256: nil),
     ]
 

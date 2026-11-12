@@ -204,6 +204,7 @@ describe("starting live calls", () => {
     const { status, body } = await callAgent();
     expect(status).toBe(201);
     expect(body.call.status).toBe("answered");
+    expect((body.call as unknown as { outgoing: boolean }).outgoing).toBe(true);
     expect(opened[0]!.setup).toEqual({
       direction: "inbound",
       agent: "Codex",

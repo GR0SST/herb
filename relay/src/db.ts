@@ -51,6 +51,8 @@ export interface Call {
   live_context: string | null;
   /** JSON list of {role, text} after a live call. */
   transcript: string | null;
+  /** 1 when the user called the agent from the phone. */
+  from_phone: number;
   created_at: number;
   updated_at: number;
 }
@@ -89,7 +91,7 @@ function newAccountKey() {
 
 const BOT_COLUMNS = "id, account_id, name, chat_url, chat_key_env, chat_model, live_instructions, webhook_url, webhook_secret";
 const DEVICE_COLUMNS = "id, account_id, name, voip_token, environment, created_at";
-const CALL_SELECT = `SELECT c.id, c.bot_id, b.name AS bot_name, c.title, c.text, c.language, c.audio_mime, c.status, c.live, c.ended_reason, c.duration_s, c.live_context, c.transcript, c.created_at, c.updated_at
+const CALL_SELECT = `SELECT c.id, c.bot_id, b.name AS bot_name, c.title, c.text, c.language, c.audio_mime, c.status, c.live, c.ended_reason, c.duration_s, c.live_context, c.transcript, c.from_phone, c.created_at, c.updated_at
   FROM calls c JOIN bots b ON b.id = c.bot_id`;
 
 export class Store {
@@ -140,6 +142,11 @@ export class Store {
     }
     for (const column of ["live_context", "transcript"]) {
       if (!callColumns.some((c) => c.name === column)) this.db.run(`ALTER TABLE calls ADD COLUMN ${column} TEXT`);
+    }
+    if (!callColumns.some((c) => c.name === "from_phone")) {
+      this.db.run("ALTER TABLE calls ADD COLUMN from_phone INTEGER NOT NULL DEFAULT 0");
+      // Earlier calls from the phone: live, with no message or subject from an agent.
+      this.db.run("UPDATE calls SET from_phone = 1 WHERE live = 1 AND text IS NULL AND title IS NULL");
     }
     // Paid live call time left, in seconds.
     this.db.run(`CREATE TABLE IF NOT EXISTS live_balance (
@@ -360,12 +367,12 @@ export class Store {
     const id = randomUUID();
     this.db
       .query(
-        `INSERT INTO calls (id, bot_id, title, text, language, audio_mime, audio_bytes, status, idempotency_key, live, live_context, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO calls (id, bot_id, title, text, language, audio_mime, audio_bytes, status, idempotency_key, live, live_context, from_phone, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(id, input.botId, input.title ?? null, input.text ?? null, input.language ?? null, input.audioMime ?? null,
         input.audioBytes ?? 0, input.status ?? "ringing", input.idempotencyKey ?? null, input.live ? 1 : 0, input.liveContext ?? null,
-        input.now, input.now);
+        input.status === "answered" ? 1 : 0, input.now, input.now);
     return this.call(id)!;
   }
 
