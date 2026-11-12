@@ -258,13 +258,13 @@ describe("starting live calls", () => {
     expect(status.live.available).toBe(false);
   });
 
-  test("the calling agent's context and the phone's language reach the voice agent", async () => {
+  test("the calling agent's context and language reach the voice agent", async () => {
     await setWebhook();
     hookReply = () => json({ context: "From the handler" });
     const placed = (await (await req("/v1/call", botToken, {
-      body: { live: true, text: "Quick question about the deploy", context: "Ask whether to roll back. I need a yes or no." },
+      body: { live: true, text: "Quick question about the deploy", language: "uk", context: "Ask whether to roll back. I need a yes or no." },
     })).json()) as { id: string };
-    await req(`/v1/calls/${placed.id}/live`, devToken, { body: { language: "uk" } });
+    await req(`/v1/calls/${placed.id}/live`, devToken, { body: { language: "en" } });
     expect(opened[0]!.setup.context).toBe("Ask whether to roll back. I need a yes or no.\n\nFrom the handler");
     expect(opened[0]!.setup.language).toBe("uk");
     expect((await req("/v1/call", botToken, { body: { live: true, context: "x".repeat(16_001) } })).status).toBe(400);

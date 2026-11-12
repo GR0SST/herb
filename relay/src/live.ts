@@ -38,7 +38,7 @@ export interface CallSetup {
   direction: Direction;
   /** The agent the user called or was called by. */
   agent: string;
-  /** Language to speak until the user speaks another, such as the phone's language. */
+  /** Language the calling agent chose. Without it the voice agent follows the language of its instructions. */
   language: string | null;
   context: string;
   instructions: string;
@@ -284,7 +284,7 @@ export function createLive(options: LiveOptions) {
   }
 
   /** Registers an answered call and asks the handler for context. */
-  async function start(call: Call, bot: Bot, direction: Direction, language: string | null = null): Promise<CallSetup> {
+  async function start(call: Call, bot: Bot, direction: Direction): Promise<CallSetup> {
     const live: LiveCall = {
       call,
       bot,
@@ -305,7 +305,7 @@ export function createLive(options: LiveOptions) {
     return {
       direction,
       agent: bot.name,
-      language: language ?? call.language,
+      language: call.language,
       // The calling agent's context first, then what the handler adds.
       context: [call.live_context ?? "", text(reply?.context, LIVE_LIMITS.context)].filter(Boolean).join("\n\n"),
       instructions: [bot.live_instructions ?? "", extra].filter(Boolean).join("\n\n"),

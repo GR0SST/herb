@@ -320,9 +320,7 @@ export function createApp(options: AppOptions) {
   /** Connects an answered live call to the speech model. */
   async function connectLive(call: Call, bot: Bot, direction: Direction, request: Request) {
     const body = (await readJson<Record<string, unknown>>(request)) ?? {};
-    // The phone sends its language, so the voice agent opens in it.
-    const language = typeof body.language === "string" && /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(body.language) ? body.language : null;
-    const setup = await live.start(call, bot, direction, language);
+    const setup = await live.start(call, bot, direction);
     try {
       const opened = await voice!.open({ call, bot, setup, controls: live.controls(call.id), body });
       live.attachVoice(call.id, opened.session);

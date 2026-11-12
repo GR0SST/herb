@@ -106,6 +106,7 @@ describe("session setup", () => {
     expect(buildInstructions(setup)).toContain("You always speak first");
     expect(buildInstructions(setup)).toContain("called Codex");
     expect(buildInstructions({ ...setup, language: "uk" })).toContain("code uk");
+    expect(buildInstructions(setup)).toContain("speak the language they are written in");
   });
 });
 

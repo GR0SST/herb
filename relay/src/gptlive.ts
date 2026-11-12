@@ -54,7 +54,9 @@ const chunks = (text: string) => {
 
 export function buildInstructions(setup: CallSetup) {
   const parts = [BASE_INSTRUCTIONS, `The main agent is called ${setup.agent}.`];
-  if (setup.language) parts.push(`Speak the language with code ${setup.language} until the user speaks another one, then switch to theirs.`);
+  parts.push(setup.language
+    ? `Speak the language with code ${setup.language}. If the user speaks another language, switch to theirs.`
+    : "Language: if the instructions or context below name a language, speak it. Otherwise speak the language they are written in. If the user speaks another language, switch to theirs.");
   if (setup.instructions) parts.push(`Instructions from the user for this agent:\n${setup.instructions}`);
   if (setup.context) parts.push(`What the main agent told you before the call:\n${setup.context}`);
   parts.push(setup.direction === "outbound"
@@ -184,8 +186,8 @@ export function attach(socket: Socket, setup: CallSetup, controls: CallControls,
     append("instructions", setup.greeting
       ? `Start the call now by saying this, in your own words if needed: ${setup.greeting}`
       : setup.direction === "outbound"
-        ? `Start the call now: say that ${setup.agent} is calling and why, from what the main agent told you.`
-        : `Start the call now: greet the user in one short sentence as ${setup.agent} and ask how you can help.`);
+        ? `Start the call now, in the language set above: say that ${setup.agent} is calling and why, from what the main agent told you.`
+        : `Start the call now, in the language set above: greet the user in one short sentence as ${setup.agent} and ask how you can help.`);
   };
 
   socket.addEventListener("open", () => {
