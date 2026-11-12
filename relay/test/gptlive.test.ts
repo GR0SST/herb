@@ -81,7 +81,8 @@ describe("session setup", () => {
     expect(session.model).toBe("gpt-live-1");
     expect(session.delegation).toEqual({ type: "client" });
     expect(session.instructions).toContain("Billing thread");
-    expect(session.safety_identifier).not.toContain("acc-1");
+    expect(request!.headers.get("openai-safety-identifier")).toHaveLength(64);
+    expect(JSON.stringify(request!.body)).not.toContain("acc-1");
     expect(session.client.data_channel.allowed_client_events).toEqual([]);
     expect(request!.body.transport).toEqual({ type: "webrtc", sdp: "offer-sdp" });
     expect(attached!.url).toBe("https://api.openai.com/v1/live/sessions/live_123/attach");
@@ -187,7 +188,9 @@ describe("sideband", () => {
 
   test("hanging up from our side closes the session without reporting twice", () => {
     const session = started();
+    socket.emit("message", { type: "session.output_transcript.delta", event_id: "e0b", delta: "Two tests fail." });
     session.hangup("user_hung_up");
+    expect(lines).toEqual([{ role: "agent", text: "Two tests fail." }]);
     expect(socket.types()).toContain("session.close");
     socket.emit("message", { type: "session.closed", event_id: "e1", reason: "close_requested" });
     expect(ended).toEqual([]);

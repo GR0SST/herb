@@ -35,7 +35,11 @@ const app = createApp({
   publicUrl: HERB_PUBLIC_URL,
   openRegistration: HERB_OPEN_REGISTRATION !== "false",
   // Without an OpenAI key live calls report unavailable.
-  voice: process.env.OPENAI_API_KEY ? createGptLive({ apiKey: process.env.OPENAI_API_KEY, voice: process.env.HERB_LIVE_VOICE }) : null,
+  voice: process.env.OPENAI_API_KEY ? createGptLive({
+    apiKey: process.env.OPENAI_API_KEY,
+    voice: process.env.HERB_LIVE_VOICE,
+    debug: process.env.HERB_LIVE_DEBUG === "true",
+  }) : null,
   billing: process.env.HERB_BILLING === "true",
   allowPrivateWebhooks: process.env.HERB_ALLOW_PRIVATE_WEBHOOKS === "true",
 });

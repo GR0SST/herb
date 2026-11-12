@@ -40,6 +40,8 @@ export interface GptLiveOptions {
   voice?: string;
   fetchImpl?: typeof fetch;
   connect?: (url: string, headers: Record<string, string>) => Socket;
+  /** Log sideband event types, without audio or text. */
+  debug?: boolean;
 }
 
 const chunks = (text: string) => {
@@ -69,15 +71,18 @@ export function createGptLive(options: GptLiveOptions): VoiceEngine {
       if (!sdp) throw new Error("SDP offer is missing");
       const response = await fetchImpl(`${API}/sessions`, {
         method: "POST",
-        headers: { ...auth, "content-type": "application/json" },
+        headers: {
+          ...auth,
+          "content-type": "application/json",
+          // Lets OpenAI spot abuse per user without learning who it is. The body field is not accepted everywhere.
+          "openai-safety-identifier": createHash("sha256").update(bot.account_id).digest("hex").slice(0, 64),
+        },
         body: JSON.stringify({
           session: {
             model: GPT_LIVE_MODEL,
             instructions: buildInstructions(setup),
             audio: { output: { voice: options.voice ?? "marin" } },
             delegation: { type: "client" },
-            // Lets OpenAI spot abuse per user without learning who it is.
-            safety_identifier: createHash("sha256").update(bot.account_id).digest("hex").slice(0, 64),
             client: {
               data_channel: {
                 allowed_client_events: [],
@@ -92,14 +97,14 @@ export function createGptLive(options: GptLiveOptions): VoiceEngine {
       const created = (await response.json()) as { session: { id: string }; transport: { sdp: string } };
       const sessionId = created.session.id;
       const socket = connect(`${API}/sessions/${encodeURIComponent(sessionId)}/attach`, auth);
-      const session = attach(socket, setup, controls);
+      const session = attach(socket, setup, controls, options.debug);
       return { client: { session_id: sessionId, sdp: created.transport.sdp }, session };
     },
   };
 }
 
 /** Runs one call over the sideband connection. */
-export function attach(socket: Socket, setup: CallSetup, controls: CallControls): VoiceSession {
+export function attach(socket: Socket, setup: CallSetup, controls: CallControls, debug = false): VoiceSession {
   let open = false;
   let started = false;
   let closing = false;
@@ -116,6 +121,7 @@ export function attach(socket: Socket, setup: CallSetup, controls: CallControls)
   let request = "";
 
   const send = (event: Record<string, unknown>) => {
+    if (debug) console.log(`gpt-live > ${String(event.type)}`);
     const data = JSON.stringify({ event_id: `herb_${++counter}`, ...event });
     if (open && started) socket.send(data);
     else outbox.push(data);
@@ -147,6 +153,7 @@ export function attach(socket: Socket, setup: CallSetup, controls: CallControls)
   const close = () => {
     if (closing) return;
     closing = true;
+    if (debug) console.log("gpt-live > session.close");
     if (open) socket.send(JSON.stringify({ type: "session.close", event_id: `herb_${++counter}` }));
     setTimeout(() => socket.close(), CLOSE_WAIT_MS);
   };
@@ -189,6 +196,12 @@ export function attach(socket: Socket, setup: CallSetup, controls: CallControls)
       if (seen.has(event.event_id)) return;
       seen.add(event.event_id);
     }
+    if (debug && !String(event.type).endsWith("audio.delta") && !String(event.type).endsWith("audio.append")) {
+      const extra = event.type === "session.delegation.created" || event.type === "session.closed" || event.type === "error"
+        ? ` ${JSON.stringify(event).slice(0, 400)}`
+        : "";
+      console.log(`gpt-live < ${String(event.type)}${extra}`);
+    }
     switch (event.type) {
       case "session.started":
         ready();
@@ -213,7 +226,10 @@ export function attach(socket: Socket, setup: CallSetup, controls: CallControls)
         break;
     }
   });
-  socket.addEventListener("close", () => finish(closing ? "agent_hung_up" : "failed"));
+  socket.addEventListener("close", () => {
+    if (debug) console.log("gpt-live sideband closed");
+    finish(closing ? "agent_hung_up" : "failed");
+  });
   socket.addEventListener("error", () => console.error("gpt-live sideband error"));
 
   return {
@@ -235,7 +251,8 @@ export function attach(socket: Socket, setup: CallSetup, controls: CallControls)
       append("commentary", "The main agent did not answer in time. Tell the user, and offer to ask again.", delegationId);
     },
     hangup(reason) {
-      // The hub ends the call itself: avoid reporting it twice.
+      // The hub ends the call itself right after this: give it the last line, and avoid reporting the end twice.
+      flushLine();
       ended = true;
       if (reason === "no_minutes") {
         append("instructions", "The user has run out of call minutes. Say a short goodbye now and mention it.");
