@@ -17,7 +17,62 @@ export const MCP_TOOLS = [
         language: { type: "string", description: "Language code of the text: ru, uk, en and others. Without it the phone guesses." },
         title: { type: "string", description: "Short call subject." },
         idempotency_key: { type: "string", description: "One key per event, so a retry does not ring twice." },
+        live: {
+          type: "boolean",
+          description: "true for a two-way live call: a voice agent opens with text and the user can talk back. Only where live calls are enabled for the user.",
+        },
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "live_call_status",
+    title: "See the live call",
+    annotations: { title: "See the live call", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description:
+      "The user's current live phone call, if any: which agent they called, the questions the voice agent is waiting on, and the recent transcript. Use it to get context before replying.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "live_call_reply",
+    title: "Reply in the live call",
+    annotations: { title: "Reply in the live call", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    description:
+      "Send your answer into the user's live phone call. A voice agent talks with the user and passes their questions on; this answers the question it is waiting on, or, if none is open, it tells the user. Works for any agent of the user, no ids needed. Write plain spoken text: short, no code, links or markdown.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "What the voice agent should tell the user, up to 8000 characters." },
+        call_id: { type: "string", description: "Optional. Defaults to the current live call." },
+        ask_id: { type: "string", description: "Optional. Defaults to the oldest open question." },
+      },
+      required: ["text"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "live_call_context",
+    title: "Add context to the live call",
+    annotations: { title: "Add context to the live call", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    description: "Give the voice agent facts to use in the user's live call without reading them out, such as progress on a task.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Facts for the voice agent, up to 16000 characters." },
+        call_id: { type: "string", description: "Optional. Defaults to the current live call." },
+      },
+      required: ["text"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "live_call_hang_up",
+    title: "End the live call",
+    annotations: { title: "End the live call", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    description: "End the user's live phone call. The voice agent says goodbye first. Only when the user asked or the conversation is clearly over.",
+    inputSchema: {
+      type: "object",
+      properties: { call_id: { type: "string", description: "Optional. Defaults to the current live call." } },
       additionalProperties: false,
     },
   },
@@ -35,10 +90,22 @@ export const MCP_TOOLS = [
   },
 ] as const;
 
+type Result = { status: number; body: unknown };
+
 export interface McpActions {
-  placeCall(bot: Bot, args: Record<string, unknown>): Promise<{ status: number; body: unknown }>;
-  callStatus(bot: Bot, id: string): { status: number; body: unknown };
+  placeCall(bot: Bot, args: Record<string, unknown>): Promise<Result>;
+  callStatus(bot: Bot, id: string): Result;
+  liveStatus(bot: Bot): Result;
+  liveReply(bot: Bot, args: Record<string, unknown>): Result;
+  liveAct(bot: Bot, action: "context" | "hangup", args: Record<string, unknown>): Result;
 }
+
+const LIVE_TOOLS: Record<string, (bot: Bot, args: Record<string, unknown>, actions: McpActions) => Result> = {
+  live_call_status: (bot, _args, actions) => actions.liveStatus(bot),
+  live_call_reply: (bot, args, actions) => actions.liveReply(bot, args),
+  live_call_context: (bot, args, actions) => actions.liveAct(bot, "context", args),
+  live_call_hang_up: (bot, args, actions) => actions.liveAct(bot, "hangup", args),
+};
 
 type RpcId = string | number | null;
 interface RpcRequest {
@@ -83,6 +150,11 @@ async function dispatch(bot: Bot, message: RpcRequest, actions: McpActions) {
       }
       if (name === "phone_call_status") {
         const { status, body } = actions.callStatus(bot, String(args.id ?? ""));
+        return ok(id, toolResult(status, body));
+      }
+      const liveTool = typeof name === "string" ? LIVE_TOOLS[name] : undefined;
+      if (liveTool) {
+        const { status, body } = liveTool(bot, args, actions);
         return ok(id, toolResult(status, body));
       }
       return rpcError(id, -32602, "Unknown tool");

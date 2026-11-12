@@ -296,6 +296,47 @@ describe("during a call", () => {
     expect((await answer("ask_1")).status).toBe(404);
   });
 
+  test("another agent of the account replies over MCP without ids", async () => {
+    const chief = store.addBot({ accountId, name: "Chief" }).token;
+    const tool = async (token: string, name: string, args: Record<string, unknown> = {}) => {
+      const response = await req("/mcp", token, { body: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } } });
+      const body = (await response.json()) as { result: { isError: boolean; content: { text: string }[] } };
+      return { isError: body.result.isError, data: JSON.parse(body.result.content[0]!.text) };
+    };
+
+    call.controls.transcript({ role: "user", text: "How are my agents doing?" });
+    expect((await call.controls.ask("How are my agents doing?")) as unknown).toMatchObject({ pending: true });
+    const status = await tool(chief, "live_call_status");
+    expect(status.data.live_call).toMatchObject({
+      call_id: callId,
+      agent: "Codex",
+      open_questions: [{ ask_id: "ask_1", question: "How are my agents doing?" }],
+    });
+
+    expect((await tool(chief, "live_call_reply", { text: "All four agents are online." })).data).toEqual({ ok: true, call_id: callId, answered: "ask_1" });
+    // No open question left: the reply is said to the user.
+    expect((await tool(chief, "live_call_reply", { text: "Also, Grok finished its task." })).data).toEqual({ ok: true, call_id: callId, answered: null });
+    expect((await tool(chief, "live_call_context", { text: "Grok ran for 3 minutes" })).isError).toBe(false);
+    expect(call.log).toEqual([
+      "answer:ask_1:All four agents are online.",
+      "say:Also, Grok finished its task.:false",
+      "context:Grok ran for 3 minutes",
+    ]);
+
+    // Agents of other accounts see no call.
+    expect((await tool(otherBotToken, "live_call_status")).data).toEqual({ live_call: null });
+    expect((await tool(otherBotToken, "live_call_reply", { text: "x" })).isError).toBe(true);
+    expect((await req(`/v1/calls/${callId}/say`, otherBotToken, { body: { text: "x" } })).status).toBe(404);
+
+    // The same over HTTP, then hang up.
+    const current = (await (await req("/v1/live/current", chief)).json()) as { live_call: { call_id: string } };
+    expect(current.live_call.call_id).toBe(callId);
+    expect((await req("/v1/live/reply", chief, { body: { text: "Bye for now" } })).status).toBe(200);
+    expect((await tool(chief, "live_call_hang_up")).isError).toBe(false);
+    expect(store.call(callId)!.ended_reason).toBe("agent_hung_up");
+    expect((await tool(chief, "live_call_reply", { text: "late" })).data.error.code).toBe("no_live_call");
+  });
+
   test("ask with nobody reachable", async () => {
     hookReply = () => new Response("down", { status: 500 });
     expect(await call.controls.ask("Anyone?")).toEqual({ offline: true });

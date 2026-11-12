@@ -501,7 +501,14 @@ describe("mcp", () => {
   });
   test("lists annotated tools", async () => {
     const body = (await (await rpc("tools/list")).json()) as { result: { tools: { name: string; annotations: { readOnlyHint: boolean } }[] } };
-    expect(body.result.tools.map((t) => [t.name, t.annotations.readOnlyHint])).toEqual([["phone_call", false], ["phone_call_status", true]]);
+    expect(body.result.tools.map((t) => [t.name, t.annotations.readOnlyHint])).toEqual([
+      ["phone_call", false],
+      ["live_call_status", true],
+      ["live_call_reply", false],
+      ["live_call_context", false],
+      ["live_call_hang_up", false],
+      ["phone_call_status", true],
+    ]);
   });
   test("phone_call rings and status reads back", async () => {
     const body = (await (await rpc("tools/call", { name: "phone_call", arguments: { text: "Hello" } })).json()) as { result: { isError: boolean; content: { text: string }[] } };

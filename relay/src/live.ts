@@ -83,7 +83,8 @@ interface LiveCall {
   /** Actions that arrived before the voice side was connected. */
   queued: ((voice: VoiceSession) => void)[];
   transcript: TranscriptLine[];
-  asks: Map<string, number>;
+  /** Open questions to the main agent, oldest first. */
+  asks: Map<string, { at: number; question: string }>;
   askCount: number;
 }
 
@@ -331,7 +332,7 @@ export function createLive(options: LiveOptions) {
     if (!question) return { error: "empty_question" };
     if (live.asks.size >= LIVE_LIMITS.openAsks) return { error: "too_many_asks" };
     const askId = `ask_${++live.askCount}`;
-    live.asks.set(askId, now());
+    live.asks.set(askId, { at: now(), question });
     const { reached, reply } = await deliver(live.bot, event(live, "agent.ask", {
       ask_id: askId,
       question,
@@ -385,7 +386,7 @@ export function createLive(options: LiveOptions) {
         hangup(id, "no_minutes");
         continue;
       }
-      for (const [askId, at] of live.asks) {
+      for (const [askId, { at }] of live.asks) {
         if (now() - at < LIVE_TIMEOUTS.askExpiry) continue;
         live.asks.delete(askId);
         withVoice(live, (voice) => voice.askExpired(askId));
@@ -395,12 +396,16 @@ export function createLive(options: LiveOptions) {
 
   // Handler actions, over HTTP or the listener
 
+  const fail = (status: number, code: string, message: string) => ({ status, body: { error: { code, message } } });
+
+  /**
+   * Any agent of the account may act on its live call: the voice agent often hands a question to another agent,
+   * which then answers. Agents of other accounts see nothing.
+   */
   function act(bot: Bot, callId: string, action: LiveAction, body: Record<string, unknown>): { status: number; body: unknown } {
-    const fail = (status: number, code: string, message: string) => ({ status, body: { error: { code, message } } });
     const live = calls.get(callId);
-    if (!live || live.bot.id !== bot.id) {
-      const stored = store.call(callId);
-      if (stored && stored.bot_id === bot.id) return fail(409, "call_ended", "The call is not live");
+    if (!live || live.bot.account_id !== bot.account_id) {
+      if (store.callForAccount(callId, bot.account_id)) return fail(409, "call_ended", "The call is not live");
       return fail(404, "not_found", "Call not found");
     }
     if (action === "hangup") {
@@ -420,6 +425,42 @@ export function createLive(options: LiveOptions) {
     if (action === "say") withVoice(live, (voice) => voice.say(value, body.interrupt === true));
     else withVoice(live, (voice) => voice.addContext(value));
     return { status: 200, body: { ok: true } };
+  }
+
+  /** The account's live call, if any: for agents that were not told the call id. */
+  function current(bot: Bot) {
+    for (const live of calls.values()) {
+      if (live.bot.account_id !== bot.account_id) continue;
+      return {
+        call_id: live.call.id,
+        agent: live.bot.name,
+        direction: live.direction,
+        title: live.call.title,
+        started_at: live.startedAt,
+        open_questions: [...live.asks].map(([ask_id, { question }]) => ({ ask_id, question })),
+        transcript: live.transcript.slice(-ASK_TRANSCRIPT_LINES),
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Replies in the account's live call. With an open question it answers it (the given one or the oldest);
+   * without one the voice agent tells the user.
+   */
+  function reply(bot: Bot, body: Record<string, unknown>): { status: number; body: unknown } {
+    const callId = typeof body.call_id === "string" && body.call_id ? body.call_id : current(bot)?.call_id;
+    if (!callId) return fail(404, "no_live_call", "There is no live call right now");
+    const value = text(body.text, LIVE_LIMITS.answer);
+    if (!value) return fail(400, "invalid_text", "Text is empty");
+    const live = calls.get(callId);
+    const askId = typeof body.ask_id === "string" && body.ask_id ? body.ask_id : live && live.bot.account_id === bot.account_id ? live.asks.keys().next().value : undefined;
+    if (askId) {
+      const result = act(bot, callId, "answer", { ask_id: askId, answer: value });
+      return result.status === 200 ? { status: 200, body: { ok: true, call_id: callId, answered: askId } } : result;
+    }
+    const result = act(bot, callId, "say", { text: value.slice(0, LIVE_LIMITS.say) });
+    return result.status === 200 ? { status: 200, body: { ok: true, call_id: callId, answered: null } } : result;
   }
 
   // Listeners
@@ -469,6 +510,8 @@ export function createLive(options: LiveOptions) {
     hangup,
     tick,
     act,
+    current,
+    reply,
     attachListener,
     detachListener,
     listenerMessage,

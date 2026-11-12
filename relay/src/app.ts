@@ -249,7 +249,24 @@ export function createApp(options: AppOptions) {
     return { status: 200, body: publicCall(call) };
   }
 
-  const mcpActions: McpActions = { placeCall, callStatus: callStatusForBot };
+  /** Live call tools for agents: the call id is optional, the account's current call is used. */
+  function liveStatusForBot(bot: Bot) {
+    return { status: 200, body: { live_call: live.current(bot) } };
+  }
+
+  function liveActForBot(bot: Bot, action: "context" | "hangup", args: Record<string, unknown>) {
+    const callId = typeof args.call_id === "string" && args.call_id ? args.call_id : live.current(bot)?.call_id;
+    if (!callId) return { status: 404, body: { error: { code: "no_live_call", message: "There is no live call right now" } } };
+    return live.act(bot, callId, action, args);
+  }
+
+  const mcpActions: McpActions = {
+    placeCall,
+    callStatus: callStatusForBot,
+    liveStatus: liveStatusForBot,
+    liveReply: (bot, args) => live.reply(bot, args),
+    liveAct: liveActForBot,
+  };
 
   async function chat(bot: Bot, request: Request) {
     if (!bot.chat_url) return err(409, "chat_unavailable", "This agent has no chat");
@@ -614,6 +631,14 @@ export function createApp(options: AppOptions) {
         }
         if (rest[0] === "calls" && rest[1] && rest.length === 2 && request.method === "GET") {
           const { status, body } = callStatusForBot(bot, rest[1]);
+          return Response.json(body, { status });
+        }
+        if (rest[0] === "live" && rest[1] === "current" && rest.length === 2 && request.method === "GET") {
+          const { status, body } = liveStatusForBot(bot);
+          return Response.json(body, { status });
+        }
+        if (rest[0] === "live" && rest[1] === "reply" && rest.length === 2 && request.method === "POST") {
+          const { status, body } = live.reply(bot, (await readJson<Record<string, unknown>>(request)) ?? {});
           return Response.json(body, { status });
         }
         const action = rest[2] === "answers" ? "answer" : rest[2];

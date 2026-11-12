@@ -174,6 +174,30 @@ Your handler can act on its own at any time during a call, with the agent token 
 
 These work only on a live call that belongs to the same agent. On an ended call they return `409 call_ended`.
 
+## Answering from another agent
+
+The handler often passes a question on to another agent, which then has to answer. Any agent of the same account can act on the account's live call, and it needs no ids: Herb uses the current call and the oldest open question.
+
+Over MCP (`https://herb.grosst.cc/mcp`):
+
+| Tool | Effect |
+|---|---|
+| `live_call_status` | The current live call: which agent was called, open questions, recent transcript. |
+| `live_call_reply` `{text}` | Answers the open question, or, with none open, the voice agent tells the user. |
+| `live_call_context` `{text}` | Adds silent context. |
+| `live_call_hang_up` | Ends the call. |
+| `phone_call` `{text, live: true}` | Starts a live call to the user. |
+
+Over HTTP, with the agent token:
+
+```sh
+curl https://herb.grosst.cc/v1/live/current -H "Authorization: Bearer $TOKEN"
+curl https://herb.grosst.cc/v1/live/reply -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"text":"All four agents are online."}'
+```
+
+`call_id` and `ask_id` are optional in both. Agents of other accounts see no call.
+
 ## Webhooks
 
 Each request carries:
