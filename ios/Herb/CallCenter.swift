@@ -17,6 +17,8 @@ struct CallSession: Identifiable, Equatable {
     let botName: String
     let title: String?
     let startedAt = Date()
+    /// When the other side came on the line, for the call timer.
+    var connectedAt: Date?
     var text: String?
     var phase: Phase = .ringing
     var live = false
@@ -287,10 +289,21 @@ final class CallCenter: NSObject {
         }
     }
 
+    private func markConnected(_ id: UUID) {
+        guard sessions[id]?.connectedAt == nil else { return }
+        var start = Date()
+        #if DEBUG
+        // App Store screenshots of a long call: -HerbDemoElapsed 3000
+        start -= UserDefaults.standard.double(forKey: "HerbDemoElapsed")
+        #endif
+        sessions[id]?.connectedAt = start
+    }
+
     private func agentReady(_ id: UUID) {
         guard sessions[id]?.phase == .connecting, liveCall?.id == id else { return }
         ringback.stop()
         sessions[id]?.phase = .live
+        markConnected(id)
         if useCallKit, sessions[id]?.outgoing == true { provider.reportOutgoingCall(with: id, connectedAt: nil) }
     }
 
@@ -346,6 +359,7 @@ final class CallCenter: NSObject {
         guard audioActive, let (id, message) = pending, sessions[id] != nil else { return }
         pending = nil
         sessions[id]?.phase = .playing
+        markConnected(id)
         let done: (Bool, Bool) -> Void = { [weak self] success, _ in
             guard let self else { return }
             if success {

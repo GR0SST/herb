@@ -90,7 +90,16 @@ struct ActiveCallView: View {
             Spacer()
             AgentAvatar(name: session.botName, size: 112)
             Text(session.botName).font(.largeTitle.weight(.semibold))
-            Text(phaseLabel(session)).font(.title3).foregroundStyle(.secondary)
+            if let connected = session.connectedAt, session.phase == .live || session.phase == .playing {
+                // Time on the line, like the Phone app.
+                TimelineView(.periodic(from: connected, by: 1)) { context in
+                    Text(Self.duration(context.date.timeIntervalSince(connected)))
+                        .font(.title3.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text(phaseLabel(session)).font(.title3).foregroundStyle(.secondary)
+            }
             if let title = session.title {
                 Text(title).font(.headline).multilineTextAlignment(.center)
             }
@@ -110,6 +119,12 @@ struct ActiveCallView: View {
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
+    }
+
+    static func duration(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds))
+        let hours = total / 3600, minutes = total % 3600 / 60, rest = total % 60
+        return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, rest) : String(format: "%02d:%02d", minutes, rest)
     }
 
     private func phaseLabel(_ session: CallSession) -> String {
