@@ -13,9 +13,6 @@ struct AgentToolbar: ToolbarContent {
                 Button("Agent Settings", systemImage: "slider.horizontal.3") { editing = true }
                     .sheet(isPresented: $editing) { AgentSettingsView(bot: bot) }
             }
-            if model.status?.live?.available == true {
-                CallAgentButton(bot: bot, size: 32)
-            }
         }
     }
 }
@@ -24,6 +21,7 @@ struct AgentToolbar: ToolbarContent {
 struct AgentContactCard: View {
     @Environment(AppModel.self) private var model
     let bot: Bot
+    @State private var editing = false
 
     var body: some View {
         VStack(spacing: 10) {
@@ -31,17 +29,21 @@ struct AgentContactCard: View {
             Text(bot.name).font(.title2.weight(.semibold))
             if model.status?.live?.available == true {
                 Button {
-                    model.callCenter.callAgent(bot)
+                    if bot.canTakeCalls { model.callCenter.callAgent(bot) } else { editing = true }
                 } label: {
                     Label("Call", systemImage: "phone.fill")
                         .font(.headline)
                         .foregroundStyle(.white)
                         .frame(maxWidth: 220, minHeight: 50)
-                        .background(Color.green, in: Capsule())
+                        .background(bot.canTakeCalls ? Color.green : Color.gray, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .disabled(model.callCenter.active != nil)
                 .padding(.top, 6)
+                .sheet(isPresented: $editing) { AgentSettingsView(bot: bot) }
+                if !bot.canTakeCalls {
+                    Text("Set up a webhook to call \(bot.name)").font(.footnote).foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity)

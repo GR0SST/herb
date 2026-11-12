@@ -22,6 +22,9 @@ struct Bot: Codable, Identifiable, Hashable {
     let name: String
     let capabilities: Capabilities
     let live: Live?
+
+    /// Something receives the agent's live call events: a webhook or a connected listener.
+    var canTakeCalls: Bool { live?.webhookURL != nil || live?.listener == true }
 }
 
 enum CallStatus: String, Codable {

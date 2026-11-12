@@ -131,24 +131,27 @@ struct AgentRow: View {
     }
 }
 
-/// Green round phone button that starts a live call with the agent.
+/// Round phone button that starts a live call with the agent.
+/// Grey when nothing receives the agent's call events yet: then it opens the agent's webhook settings.
 struct CallAgentButton: View {
     @Environment(AppModel.self) private var model
     let bot: Bot
     var size: CGFloat = 36
+    @State private var editing = false
 
     var body: some View {
         Button {
-            model.callCenter.callAgent(bot)
+            if bot.canTakeCalls { model.callCenter.callAgent(bot) } else { editing = true }
         } label: {
             Image(systemName: "phone.fill")
                 .font(.system(size: size * 0.42, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: size, height: size)
-                .background(Color.green, in: Circle())
+                .background(bot.canTakeCalls ? Color.green : Color.gray, in: Circle())
         }
         .buttonStyle(.borderless)
         .disabled(model.callCenter.active != nil)
-        .accessibilityLabel("Call \(bot.name)")
+        .accessibilityLabel(bot.canTakeCalls ? "Call \(bot.name)" : "Set up calls with \(bot.name)")
+        .sheet(isPresented: $editing) { AgentSettingsView(bot: bot) }
     }
 }
