@@ -9,6 +9,9 @@ import StoreKit
 @Observable
 final class Purchases {
     private(set) var products: [Product] = []
+    /// Why plans could not be shown, for the Live Calls section.
+    private(set) var productsError: String?
+    @ObservationIgnored private var productIDs: [String] = []
     private(set) var isWorking = false
     var errorMessage: String?
 
@@ -27,12 +30,21 @@ final class Purchases {
     }
 
     func loadProducts(ids: [String]) async {
+        productIDs = ids
         guard !ids.isEmpty, Set(ids) != Set(products.map(\.id)) else { return }
         do {
             products = try await Product.products(for: ids).sorted { $0.price < $1.price }
+            productsError = products.isEmpty ? "The App Store returned no plans yet. Try again in a few minutes." : nil
         } catch {
             products = []
+            productsError = error.localizedDescription
         }
+    }
+
+    func reloadProducts() async {
+        let ids = productIDs
+        products = []
+        await loadProducts(ids: ids)
     }
 
     func buy(_ product: Product) async {

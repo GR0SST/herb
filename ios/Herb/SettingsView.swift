@@ -233,6 +233,10 @@ private struct LiveCallsSection: View {
                     }
                     .disabled(purchases.isWorking || current)
                 }
+                if purchases.products.isEmpty, let problem = purchases.productsError {
+                    Text(problem).font(.footnote).foregroundStyle(.secondary)
+                    Button("Load Plans Again") { Task { await purchases.reloadProducts() } }
+                }
                 if live.subscription != nil {
                     Button("Manage Subscription") { managing = true }
                 }
