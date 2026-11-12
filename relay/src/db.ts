@@ -284,12 +284,25 @@ export class Store {
     this.db.query("UPDATE bots SET chat_url = ?, chat_key_env = ?, chat_model = ? WHERE id = ?").run(chat.url, chat.keyEnv, chat.model, id);
   }
 
-  /** Saves the voice agent's instructions and webhook. A new webhook URL gets a new secret, returned once. */
-  setBotLive(id: string, live: { instructions?: string | null; webhookUrl?: string | null }) {
+  /**
+   * Saves the voice agent's instructions and webhook. The secret can come from the receiving service;
+   * otherwise a new webhook URL gets a generated one. Returns a generated secret so it can be shown once.
+   */
+  setBotLive(id: string, live: { instructions?: string | null; webhookUrl?: string | null; webhookSecret?: string }) {
     if (live.instructions !== undefined) this.db.query("UPDATE bots SET live_instructions = ? WHERE id = ?").run(live.instructions, id);
+    if (live.webhookUrl === null) {
+      this.db.query("UPDATE bots SET webhook_url = NULL, webhook_secret = NULL WHERE id = ?").run(id);
+      return null;
+    }
+    if (live.webhookUrl !== undefined) this.db.query("UPDATE bots SET webhook_url = ? WHERE id = ?").run(live.webhookUrl, id);
+    if (live.webhookSecret) {
+      this.db.query("UPDATE bots SET webhook_secret = ? WHERE id = ?").run(live.webhookSecret, id);
+      return null;
+    }
     if (live.webhookUrl === undefined) return null;
-    const secret = live.webhookUrl ? `whsec_${randomBytes(24).toString("base64url")}` : null;
-    this.db.query("UPDATE bots SET webhook_url = ?, webhook_secret = ? WHERE id = ?").run(live.webhookUrl, secret, id);
+    // Standard Webhooks format: whsec_ and base64.
+    const secret = `whsec_${randomBytes(24).toString("base64")}`;
+    this.db.query("UPDATE bots SET webhook_secret = ? WHERE id = ?").run(secret, id);
     return secret;
   }
 

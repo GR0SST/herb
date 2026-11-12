@@ -119,6 +119,12 @@ export function signWebhook(secret: string, timestamp: number, body: string) {
   return `v1=${createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex")}`;
 }
 
+/** Standard Webhooks signature (https://www.standardwebhooks.com), which many services verify. */
+export function signStandardWebhook(secret: string, id: string, timestamp: number, body: string) {
+  const key = secret.startsWith("whsec_") ? Buffer.from(secret.slice(6), "base64") : Buffer.from(secret);
+  return `v1,${createHmac("sha256", key).update(`${id}.${timestamp}.${body}`).digest("base64")}`;
+}
+
 function privateIPv4(ip: string) {
   const [a, b] = ip.split(".").map(Number) as [number, number];
   return a === 0 || a === 10 || a === 127 || a >= 224
@@ -213,6 +219,9 @@ export function createLive(options: LiveOptions) {
           "herb-event-id": event.id,
           "herb-timestamp": String(timestamp),
           "herb-signature": signWebhook(bot.webhook_secret, timestamp, body),
+          "webhook-id": event.id,
+          "webhook-timestamp": String(timestamp),
+          "webhook-signature": signStandardWebhook(bot.webhook_secret, event.id, timestamp, body),
         },
         body,
       });

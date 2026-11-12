@@ -28,6 +28,7 @@ struct AgentSettingsView: View {
     let bot: Bot
     @State private var instructions = ""
     @State private var webhookURL = ""
+    @State private var ownSecret = ""
     @State private var secret: String?
     @State private var copied = false
     @State private var isSaving = false
@@ -49,6 +50,11 @@ struct AgentSettingsView: View {
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                    if secret == nil {
+                        SecureField("Signing secret (optional)", text: $ownSecret)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
                     if let secret {
                         Button {
                             UIPasteboard.general.string = secret
@@ -67,6 +73,8 @@ struct AgentSettingsView: View {
                 } footer: {
                     if secret != nil {
                         Text("Copy the secret now. It is shown only once and signs every event.")
+                    } else if !ownSecret.isEmpty || bot.live?.webhookURL == nil {
+                        Text("Paste the signing secret your service shows for this webhook. Leave it empty and Herb creates one.")
                     } else if bot.live?.listener == true {
                         Text("A listener is connected. It gets events instead of the webhook.")
                     } else {
@@ -105,6 +113,10 @@ struct AgentSettingsView: View {
         }
         if cleanURL != (bot.live?.webhookURL ?? "") {
             changes["webhook_url"] = .some(cleanURL.isEmpty ? nil : cleanURL)
+        }
+        let cleanSecret = ownSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanSecret.isEmpty && !cleanURL.isEmpty {
+            changes["webhook_secret"] = .some(cleanSecret)
         }
         guard !changes.isEmpty, let api = model.api else {
             dismiss()

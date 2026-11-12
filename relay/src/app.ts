@@ -342,7 +342,7 @@ export function createApp(options: AppOptions) {
   });
 
   async function updateBot(bot: Bot, request: Request) {
-    const body = await readJson<{ instructions?: unknown; webhook_url?: unknown }>(request);
+    const body = await readJson<{ instructions?: unknown; webhook_url?: unknown; webhook_secret?: unknown }>(request);
     if (!body) return err(400, "invalid_json", "Invalid JSON");
     let instructions: string | null | undefined;
     if (body.instructions !== undefined) {
@@ -362,7 +362,17 @@ export function createApp(options: AppOptions) {
         if (!(await live.safeWebhook(webhookUrl))) return err(400, "invalid_webhook_url", "Webhook URL must be a public address");
       }
     }
-    const secret = store.setBotLive(bot.id, { instructions, webhookUrl });
+    let webhookSecret: string | undefined;
+    if (body.webhook_secret !== undefined && body.webhook_secret !== null) {
+      webhookSecret = typeof body.webhook_secret === "string" ? body.webhook_secret.trim() : "";
+      if (webhookSecret.length < 8 || webhookSecret.length > 300) {
+        return err(400, "invalid_webhook_secret", "Signing secret must be 8 to 300 characters");
+      }
+      if (webhookUrl === null || (webhookUrl === undefined && !bot.webhook_url)) {
+        return err(400, "invalid_webhook_secret", "Set a webhook URL with the signing secret");
+      }
+    }
+    const secret = store.setBotLive(bot.id, { instructions, webhookUrl, webhookSecret });
     return Response.json({ ...ownerBot(store.bot(bot.id)!), ...(secret ? { webhook_secret: secret } : {}) });
   }
 

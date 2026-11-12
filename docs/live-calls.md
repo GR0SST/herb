@@ -186,6 +186,16 @@ Herb-Signature: v1=<hex HMAC-SHA256 of "<timestamp>.<raw body>" with the agent's
 
 Check the signature and reject timestamps more than 5 minutes off. The secret is shown once when you set the webhook URL.
 
+Requests are also signed the [Standard Webhooks](https://www.standardwebhooks.com) way, which many services check out of the box:
+
+```
+webhook-id: evt_8f2c1a
+webhook-timestamp: 1794480000
+webhook-signature: v1,<base64 HMAC-SHA256 of "<id>.<timestamp>.<raw body>">
+```
+
+If the receiving service gives you its own signing secret, such as `whsec_...`, set it with `webhook_secret` together with the URL. A `whsec_` secret is base64-decoded into the HMAC key, as the standard says; any other secret is used as is.
+
 Webhooks must use `https://` and a public address. Redirects are not followed.
 
 `call.started` and `agent.ask` are not retried: by the time a retry arrived, the moment would be gone. `call.ended` is retried after 10 s, 1 min, 10 min and 1 h until a 2xx. Use `Herb-Event-Id` to skip duplicates.
@@ -239,6 +249,7 @@ curl -X PATCH https://herb.grosst.cc/v1/bots/<agent id> \
 
 - `instructions`: how the voice agent behaves in every call, up to 4,000 characters. `null` clears.
 - `webhook_url`: a new URL returns a new `webhook_secret`, shown only in this response. `null` removes the webhook.
+- `webhook_secret`: your own signing secret, 8 to 300 characters, instead of a generated one. Needs a webhook URL.
 
 The agent list shows `live.webhook_url`, `live.instructions` and whether a listener is connected (`live.listener`).
 

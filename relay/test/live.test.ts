@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createHmac } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -140,6 +141,29 @@ describe("agent settings", () => {
     const timestamp = Number(hit.headers.get("herb-timestamp"));
     expect(hit.headers.get("herb-signature")).toBe(signWebhook(secret, timestamp, hit.body));
     expect(hit.headers.get("herb-event-id")).toBe(hit.event.id);
+  });
+
+  test("takes the receiving service's signing secret and signs the Standard Webhooks way", async () => {
+    const own = `whsec_${Buffer.from("their-secret-key-bytes").toString("base64")}`;
+    const response = await req(`/v1/bots/${botId}`, devToken, { method: "PATCH", body: { webhook_url: HOOK, webhook_secret: own } });
+    expect(((await response.json()) as Record<string, unknown>).webhook_secret).toBeUndefined();
+    expect(store.bot(botId)!.webhook_secret).toBe(own);
+
+    await callAgent();
+    const hit = hits[0]!;
+    const id = hit.headers.get("webhook-id")!;
+    const timestamp = hit.headers.get("webhook-timestamp")!;
+    const expected = createHmac("sha256", Buffer.from("their-secret-key-bytes")).update(`${id}.${timestamp}.${hit.body}`).digest("base64");
+    expect(hit.headers.get("webhook-signature")).toBe(`v1,${expected}`);
+    expect(id).toBe(hit.event.id);
+
+    // The secret alone can change; without a URL it cannot be set.
+    expect((await req(`/v1/bots/${botId}`, devToken, { method: "PATCH", body: { webhook_secret: "another-secret" } })).status).toBe(200);
+    expect(store.bot(botId)!.webhook_secret).toBe("another-secret");
+    expect((await req(`/v1/bots/${botId}`, devToken, { method: "PATCH", body: { webhook_secret: "short" } })).status).toBe(400);
+    await req(`/v1/bots/${botId}`, devToken, { method: "PATCH", body: { webhook_url: null } });
+    expect(store.bot(botId)!.webhook_secret).toBeNull();
+    expect((await req(`/v1/bots/${botId}`, devToken, { method: "PATCH", body: { webhook_secret: "another-secret" } })).status).toBe(400);
   });
 
   test("rejects private and non-https webhooks", async () => {
