@@ -57,6 +57,24 @@ export interface Call {
   updated_at: number;
 }
 
+export interface Subscription {
+  original_transaction_id: string;
+  account_id: string | null;
+  product_id: string;
+  environment: string;
+  /** The transaction that started the current period. */
+  transaction_id: string;
+  period_start: number;
+  expires_at: number | null;
+  seconds_total: number;
+  seconds_used: number;
+  auto_renew: number | null;
+  revoked: number;
+  /** When the subscription last moved to another account. */
+  moved_at: number | null;
+  updated_at: number;
+}
+
 export interface OAuthClient {
   id: string;
   name: string;
@@ -148,11 +166,30 @@ export class Store {
       // Earlier calls from the phone: live, with no message or subject from an agent.
       this.db.run("UPDATE calls SET from_phone = 1 WHERE live = 1 AND text IS NULL AND title IS NULL");
     }
-    // Paid live call time left, in seconds.
+    // Live call time outside a subscription: gifted or free minutes, in seconds. unlimited: no counting at all.
     this.db.run(`CREATE TABLE IF NOT EXISTS live_balance (
       account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
       seconds INTEGER NOT NULL
     )`);
+    const balanceColumns = this.db.query<{ name: string }, []>("PRAGMA table_info(live_balance)").all();
+    if (!balanceColumns.some((c) => c.name === "unlimited")) this.db.run("ALTER TABLE live_balance ADD COLUMN unlimited INTEGER NOT NULL DEFAULT 0");
+    // App Store subscriptions. They belong to an Apple ID, so the account they count for can change.
+    this.db.run(`CREATE TABLE IF NOT EXISTS subscriptions (
+      original_transaction_id TEXT PRIMARY KEY,
+      account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+      product_id TEXT NOT NULL,
+      environment TEXT NOT NULL,
+      transaction_id TEXT NOT NULL,
+      period_start INTEGER NOT NULL,
+      expires_at INTEGER,
+      seconds_total INTEGER NOT NULL,
+      seconds_used INTEGER NOT NULL DEFAULT 0,
+      auto_renew INTEGER,
+      revoked INTEGER NOT NULL DEFAULT 0,
+      moved_at INTEGER,
+      updated_at INTEGER NOT NULL
+    )`);
+    this.db.run("CREATE INDEX IF NOT EXISTS subscriptions_account ON subscriptions(account_id)");
     this.db.run(`CREATE TABLE IF NOT EXISTS oauth_clients (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, redirect_uris TEXT NOT NULL, created_at INTEGER NOT NULL
     )`);
@@ -425,6 +462,57 @@ export class Store {
       .query(`INSERT INTO live_balance (account_id, seconds) VALUES (?, max(0, ?))
               ON CONFLICT (account_id) DO UPDATE SET seconds = max(0, seconds + ?)`)
       .run(accountId, Math.round(delta), Math.round(delta));
+  }
+
+  isUnlimited(accountId: string) {
+    return this.db.query<{ unlimited: number }, [string]>("SELECT unlimited FROM live_balance WHERE account_id = ?").get(accountId)?.unlimited === 1;
+  }
+
+  setUnlimited(accountId: string, unlimited: boolean) {
+    this.db
+      .query(`INSERT INTO live_balance (account_id, seconds, unlimited) VALUES (?, 0, ?)
+              ON CONFLICT (account_id) DO UPDATE SET unlimited = excluded.unlimited`)
+      .run(accountId, unlimited ? 1 : 0);
+  }
+
+  // Subscriptions
+
+  subscription(originalTransactionId: string) {
+    return this.db.query<Subscription, [string]>("SELECT * FROM subscriptions WHERE original_transaction_id = ?").get(originalTransactionId);
+  }
+
+  /** The account's subscription that is still running, if any. */
+  activeSubscription(accountId: string, now: number) {
+    return this.db
+      .query<Subscription, [string, number]>(
+        `SELECT * FROM subscriptions WHERE account_id = ? AND revoked = 0 AND (expires_at IS NULL OR expires_at > ?)
+         ORDER BY expires_at DESC LIMIT 1`,
+      )
+      .get(accountId, now);
+  }
+
+  /** The latest subscription of the account, running or not, to show its state. */
+  latestSubscription(accountId: string) {
+    return this.db.query<Subscription, [string]>("SELECT * FROM subscriptions WHERE account_id = ? ORDER BY expires_at DESC LIMIT 1").get(accountId);
+  }
+
+  saveSubscription(sub: Subscription) {
+    this.db
+      .query(`INSERT INTO subscriptions (original_transaction_id, account_id, product_id, environment, transaction_id, period_start, expires_at,
+                seconds_total, seconds_used, auto_renew, revoked, moved_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT (original_transaction_id) DO UPDATE SET account_id = excluded.account_id, product_id = excluded.product_id,
+                environment = excluded.environment, transaction_id = excluded.transaction_id, period_start = excluded.period_start,
+                expires_at = excluded.expires_at, seconds_total = excluded.seconds_total, seconds_used = excluded.seconds_used,
+                auto_renew = excluded.auto_renew, revoked = excluded.revoked, moved_at = excluded.moved_at, updated_at = excluded.updated_at`)
+      .run(sub.original_transaction_id, sub.account_id, sub.product_id, sub.environment, sub.transaction_id, sub.period_start, sub.expires_at,
+        sub.seconds_total, sub.seconds_used, sub.auto_renew, sub.revoked, sub.moved_at, sub.updated_at);
+  }
+
+  spendSubscription(originalTransactionId: string, seconds: number) {
+    this.db
+      .query("UPDATE subscriptions SET seconds_used = min(seconds_total, seconds_used + ?) WHERE original_transaction_id = ?")
+      .run(Math.round(seconds), originalTransactionId);
   }
 
   expireRinging(now: number) {

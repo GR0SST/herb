@@ -4,6 +4,7 @@ import type { PushSender } from "./apns";
 import { clearSessionCookie, readCookie, SESSION_COOKIE, sessionCookie } from "./cookies";
 import { type Bot, type Call, type CallStatus, type Device, type Store, TEST_AGENT_NAME } from "./db";
 import { clientIp, WindowLimiter } from "./limits";
+import { BillingError, createBilling } from "./billing";
 import { createLive, LIVE_LIMITS, type Direction, type LiveAction, type Listener, type VoiceEngine, webhookUrlError } from "./live";
 import { handleMcp, type McpActions } from "./mcp";
 import type { OAuth } from "./oauth";
@@ -47,6 +48,14 @@ export interface AppOptions {
   liveAccounts?: string[];
   /** Charge live calls against bought minutes. */
   billing?: boolean;
+  /** App Store product id → live call minutes per subscription period. */
+  products?: Record<string, number>;
+  bundleId?: string | null;
+  sandboxMinutes?: number;
+  /** Free live call minutes for each new account. */
+  freeMinutes?: number;
+  /** Trusted App Store roots, for tests. */
+  appleRoots?: string[];
   /** Let webhooks reach private addresses. Only for self-hosted servers. */
   allowPrivateWebhooks?: boolean;
   resolveHost?: (host: string) => Promise<string[]>;
@@ -113,7 +122,7 @@ async function readJson<T>(request: Request): Promise<T | null> {
   }
 }
 
-export function createAccounts(store: Store, options: { open: boolean; now: () => number }) {
+export function createAccounts(store: Store, options: { open: boolean; now: () => number; freeSeconds?: number }) {
   const perIp = new WindowLimiter(NEW_ACCOUNTS_PER_IP_HOUR, HOUR_MS);
   const global = new WindowLimiter(NEW_ACCOUNTS_PER_HOUR, HOUR_MS, 1);
   const keyFailures = new WindowLimiter(KEY_FAILURES_PER_IP, 15 * 60 * 1000);
@@ -129,7 +138,9 @@ export function createAccounts(store: Store, options: { open: boolean; now: () =
       }
       perIp.record(ip, now);
       global.record("all", now);
-      return store.createAccount(now);
+      const created = store.createAccount(now);
+      if (options.freeSeconds) store.addLiveSeconds(created.id, options.freeSeconds);
+      return created;
     },
     /** Checks a key, limiting attempts per address. */
     verifyKey(request: Request, key: string): { id: string } | { error: Response } {
@@ -154,7 +165,17 @@ export function createApp(options: AppOptions) {
   const env = options.env ?? process.env;
   const now = options.now ?? Date.now;
   const fetchImpl = options.fetchImpl ?? fetch;
-  const accounts = createAccounts(store, { open: options.openRegistration ?? true, now });
+  const accounts = createAccounts(store, { open: options.openRegistration ?? true, now, freeSeconds: (options.freeMinutes ?? 0) * 60 });
+  const billing = createBilling({
+    store,
+    now,
+    enabled: options.billing ?? false,
+    products: options.products ?? {},
+    bundleId: options.bundleId ?? null,
+    sandboxMinutes: options.sandboxMinutes ?? 5,
+    roots: options.appleRoots,
+    checkMarkers: options.appleRoots ? false : true,
+  });
   oauth?.useAccounts(accounts);
   const voice = options.voice ?? null;
   const liveAccounts = options.liveAccounts?.length ? new Set(options.liveAccounts) : null;
@@ -164,7 +185,7 @@ export function createApp(options: AppOptions) {
     store,
     now,
     fetchImpl,
-    billing: options.billing ?? false,
+    minutes: billing,
     allowPrivateWebhooks,
     resolveHost: options.resolveHost,
     retryDelays: options.webhookRetryDelays,
@@ -499,12 +520,19 @@ export function createApp(options: AppOptions) {
         push_registered: device ? Boolean(device.voip_token) : phones.some((p) => p.voip_token),
         phones: phones.length,
         mcp_url: options.publicUrl ? `${options.publicUrl}/mcp` : null,
-        live: {
-          available: liveFor(accountId),
-          billing: options.billing ?? false,
-          seconds_left: options.billing ? store.liveSeconds(accountId) : null,
-        },
+        live: { available: liveFor(accountId), ...billing.plan(accountId) },
       });
+    }
+    if (resource === "billing" && id === "transactions" && method === "POST") {
+      if (!device) return err(403, "forbidden", "Only for phones");
+      const body = await readJson<{ jws?: unknown }>(request);
+      if (typeof body?.jws !== "string" || body.jws.length > 20_000) return err(400, "invalid_jws", "Send the signed transaction as jws");
+      try {
+        return Response.json({ live: { available: liveFor(accountId), ...billing.fromPhone(accountId, body.jws) } });
+      } catch (error) {
+        if (error instanceof BillingError) return err(error.status, error.code, error.message);
+        throw error;
+      }
     }
     if (resource === "account" && !id && method === "DELETE") {
       removeAudio(store.deleteAccount(accountId));
@@ -626,6 +654,24 @@ export function createApp(options: AppOptions) {
 
     const oauthResponse = await oauth?.handle(request, url);
     if (oauthResponse) return oauthResponse;
+
+    // App Store Server Notifications: Apple's signature is the authentication.
+    if (url.pathname === "/v1/billing/apple" && request.method === "POST") {
+      const body = await readJson<{ signedPayload?: unknown }>(request);
+      if (typeof body?.signedPayload !== "string") return err(400, "invalid_payload", "signedPayload is missing");
+      try {
+        const result = billing.fromApple(body.signedPayload);
+        if (!result.handled) console.log(`app store notification ${result.type} skipped`);
+        return Response.json({ ok: true });
+      } catch (error) {
+        if (error instanceof BillingError) {
+          console.error(`app store notification refused: ${error.message}`);
+          // Unknown products and bad signatures are not worth retrying, except for a signature problem we should see.
+          return err(error.code === "invalid_signature" ? 401 : 200, error.code, error.message);
+        }
+        throw error;
+      }
+    }
 
     const opened = await publicRoute(request, url);
     if (opened) return opened;

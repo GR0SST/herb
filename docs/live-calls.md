@@ -278,13 +278,28 @@ ws.onmessage = async ({ data }) => {
 
 ## Minutes
 
-Live calls on the hosted server are paid: a monthly subscription in the iPhone app includes a number of minutes. Minutes are counted on the server from answer to hang-up. When they run out, the voice agent says so and the call ends with `no_minutes`. Calls that fail to start are not counted.
+Live calls on the hosted server are paid. An account has one of these:
 
-Starting a live call without minutes returns `402 no_minutes`. One-way calls stay free.
+- **Subscription** from the iPhone app: a number of minutes per period. Unused minutes do not carry over. The subscription belongs to the Apple ID: signing in with another account key on the phone moves it there, at most once a day.
+- **Bonus minutes**, gifted by the server owner or given to new accounts (`HERB_FREE_MINUTES`). They never expire and are spent after the subscription's.
+- **Unlimited**, set by the server owner for themselves and friends.
 
-The subscription belongs to your Apple ID, not to your key. If you sign in with another key on the phone, the subscription and remaining minutes move to the new account.
+Minutes are counted on the server from answer to hang-up. When they run out, the voice agent says so and the call ends with `no_minutes`. Starting a live call without minutes returns `402 no_minutes`. One-way calls stay free.
 
-**Self-hosted:** set `OPENAI_API_KEY` to turn live calls on. Minutes are off unless you set `HERB_BILLING=true`, so live calls have no limit. You pay the speech model provider directly. With billing on, add minutes with `bun run cli minutes <account-key> <minutes>`. To send webhooks to your own network, set `HERB_ALLOW_PRIVATE_WEBHOOKS=true`.
+`GET /v1/status` returns the plan under `live`: `unlimited`, `seconds_left` (`null` for no limit), `bonus_seconds`, `subscription` and the `products` on sale.
+
+The phone sends signed App Store transactions to `POST /v1/billing/transactions`; the server checks Apple's signature itself. Renewals, expirations and refunds come from Apple to `POST /v1/billing/apple` ([App Store Server Notifications V2](https://developer.apple.com/documentation/appstoreservernotifications)).
+
+**Self-hosted:** set `OPENAI_API_KEY` to turn live calls on. Without `HERB_BILLING=true` every account is unlimited and you pay the speech model provider directly. With billing on, set the products and manage accounts with the CLI:
+
+```sh
+HERB_PRODUCTS=cc.grosst.herb.live.monthly=100   # product id = minutes per period
+bun run cli unlimited <account> on               # no counting for this account
+bun run cli minutes <account> 30                 # gift 30 minutes
+bun run cli live <account>                       # show the plan
+```
+
+`<account>` is a key, an id or the start of an id. Sandbox purchases (TestFlight, App Review) are free, so they give at most `HERB_SANDBOX_MINUTES` (5 by default). To send webhooks to your own network, set `HERB_ALLOW_PRIVATE_WEBHOOKS=true`.
 
 ## Agent settings
 

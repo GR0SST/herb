@@ -84,13 +84,46 @@ extension String {
 
 struct RelayStatus: Codable {
     struct Live: Codable {
+        struct Subscription: Codable {
+            let productID: String
+            let active: Bool
+            let secondsTotal: Int
+            let secondsUsed: Int
+            let expiresAt: Double?
+            let autoRenew: Bool?
+            let sandbox: Bool
+
+            var expires: Date? { expiresAt.map { Date(timeIntervalSince1970: $0 / 1000) } }
+
+            enum CodingKeys: String, CodingKey {
+                case active, sandbox
+                case productID = "product_id"
+                case secondsTotal = "seconds_total"
+                case secondsUsed = "seconds_used"
+                case expiresAt = "expires_at"
+                case autoRenew = "auto_renew"
+            }
+        }
+
+        struct Product: Codable {
+            let id: String
+            let minutes: Int
+        }
+
         let available: Bool
         let billing: Bool
+        /// Live calls are not counted for this account.
+        let unlimited: Bool?
+        /// Nil means no limit.
         let secondsLeft: Int?
+        let bonusSeconds: Int?
+        let subscription: Subscription?
+        let products: [Product]?
 
         enum CodingKeys: String, CodingKey {
-            case available, billing
+            case available, billing, unlimited, subscription, products
             case secondsLeft = "seconds_left"
+            case bonusSeconds = "bonus_seconds"
         }
     }
 

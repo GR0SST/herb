@@ -16,6 +16,9 @@ final class AppModel {
     var errorMessage: String?
 
     let callCenter = CallCenter()
+    let purchases = Purchases()
+    /// Subscriptions are sent once per launch and after each sign-in.
+    @ObservationIgnored private var sentEntitlements = false
 
     #if DEBUG
     private let pushEnvironment = "sandbox"
@@ -43,6 +46,11 @@ final class AppModel {
             Task { await self?.refresh() }
         }
         callCenter.start()
+        purchases.api = { [weak self] in self?.api }
+        purchases.onChange = { [weak self] in
+            Task { await self?.refresh() }
+        }
+        purchases.start()
     }
 
     private var deviceName: String { UIDevice.current.model }
@@ -77,6 +85,8 @@ final class AppModel {
         try ConnectionStore.save(candidate, accountKey: key)
         connection = candidate
         errorMessage = nil
+        // A subscription follows the Apple ID: send it to the account just signed in.
+        sentEntitlements = false
         await uploadPushToken()
         await refresh()
     }
@@ -138,6 +148,13 @@ final class AppModel {
             async let status = api.status()
             (self.bots, self.calls, self.status) = try await (bots, calls, status)
             errorMessage = nil
+            if let live = self.status?.live, live.billing {
+                await purchases.loadProducts(ids: live.products?.map(\.id) ?? [])
+                if !sentEntitlements {
+                    sentEntitlements = true
+                    await purchases.sendEntitlements()
+                }
+            }
         } catch is CancellationError {
             return
         } catch let error as URLError where error.code == .cancelled {

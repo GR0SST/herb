@@ -27,6 +27,16 @@ const { HERB_PUBLIC_URL, HERB_OPEN_REGISTRATION } = process.env;
 const oauth = HERB_PUBLIC_URL ? createOAuth({ store, publicUrl: HERB_PUBLIC_URL }) : null;
 if (!oauth) console.warn("HERB_PUBLIC_URL is not set: browser sign-in is off, agents need a token.");
 
+/** HERB_PRODUCTS: "product.id=100,other.id=300", minutes per period. */
+function parseProducts(value: string | undefined) {
+  const products: Record<string, number> = {};
+  for (const pair of value?.split(",") ?? []) {
+    const [id, minutes] = pair.split("=").map((part) => part.trim());
+    if (id && minutes && Number(minutes) > 0) products[id] = Number(minutes);
+  }
+  return products;
+}
+
 const app = createApp({
   store,
   dataDir,
@@ -41,6 +51,10 @@ const app = createApp({
     debug: process.env.HERB_LIVE_DEBUG === "true",
   }) : null,
   billing: process.env.HERB_BILLING === "true",
+  products: parseProducts(process.env.HERB_PRODUCTS),
+  bundleId: process.env.HERB_BUNDLE_ID ?? APNS_BUNDLE_ID ?? null,
+  sandboxMinutes: Number(process.env.HERB_SANDBOX_MINUTES ?? 5),
+  freeMinutes: Number(process.env.HERB_FREE_MINUTES ?? 0),
   liveAccounts: process.env.HERB_LIVE_ACCOUNTS?.split(",").map((id) => id.trim()).filter(Boolean),
   allowPrivateWebhooks: process.env.HERB_ALLOW_PRIVATE_WEBHOOKS === "true",
 });

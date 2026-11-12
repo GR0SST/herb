@@ -138,6 +138,12 @@ struct API {
         return .requested
     }
 
+    /// Sends a signed App Store transaction, so the server counts its minutes for this account.
+    func sendTransaction(_ jws: String) async throws {
+        struct Body: Encodable { let jws: String }
+        _ = try await send(request("v1/billing/transactions", method: "POST", body: Body(jws: jws)))
+    }
+
     func status() async throws -> RelayStatus {
         try JSONDecoder().decode(RelayStatus.self, from: await send(request("v1/status")))
     }

@@ -122,8 +122,8 @@ export interface LiveOptions {
   store: Store;
   now: () => number;
   fetchImpl: typeof fetch;
-  /** Charge live calls against the account's minutes. Off on self-hosted servers. */
-  billing: boolean;
+  /** Live call time per account: what is left (null for no limit) and spending it. */
+  minutes: { budget(accountId: string): number | null; spend(accountId: string, seconds: number): void };
   /** Allow webhooks to private addresses and plain http. Only for self-hosted servers. */
   allowPrivateWebhooks: boolean;
   resolveHost?: (host: string) => Promise<string[]>;
@@ -176,7 +176,7 @@ export function webhookUrlError(raw: string, allowPrivate: boolean) {
 }
 
 export function createLive(options: LiveOptions) {
-  const { store, now, fetchImpl, billing } = options;
+  const { store, now, fetchImpl, minutes } = options;
   const resolveHost = options.resolveHost ?? (async (host: string) => (await lookup(host, { all: true })).map((a) => a.address));
   const retryDelays = options.retryDelays ?? RETRY_DELAYS;
   const calls = new Map<string, LiveCall>();
@@ -309,7 +309,8 @@ export function createLive(options: LiveOptions) {
 
   /** Whether the account may start a live call. Returns an error code or null. */
   function canStart(accountId: string) {
-    if (billing && store.liveSeconds(accountId) <= 0) return "no_minutes";
+    const left = minutes.budget(accountId);
+    if (left !== null && left <= 0) return "no_minutes";
     if (activeCallFor(accountId)) return "call_in_progress";
     return null;
   }
@@ -321,7 +322,7 @@ export function createLive(options: LiveOptions) {
       bot,
       direction,
       startedAt: now(),
-      budget: billing ? store.liveSeconds(bot.account_id) : null,
+      budget: minutes.budget(bot.account_id),
       voice: null,
       queued: [],
       transcript: [],
@@ -396,7 +397,7 @@ export function createLive(options: LiveOptions) {
     if (!live) return;
     calls.delete(callId);
     const duration = Math.max(0, Math.ceil((now() - live.startedAt) / 1000));
-    if (billing) store.addLiveSeconds(live.bot.account_id, -duration);
+    minutes.spend(live.bot.account_id, duration);
     store.endLiveCall(callId, reason, duration, now(), live.transcript);
     deliverEnded(live.bot, event(live, "call.ended", { reason, duration_s: duration, transcript: live.transcript }));
   }

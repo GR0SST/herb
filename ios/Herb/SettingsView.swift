@@ -1,3 +1,4 @@
+import StoreKit
 import AVFoundation
 import SwiftUI
 import UIKit
@@ -47,6 +48,9 @@ struct SettingsView: View {
                     Section {
                         LabeledContent("Live Minutes Left", value: "\((live.secondsLeft ?? 0) / 60)")
                     }
+                }
+                if let live = model.status?.live, live.available {
+                    LiveCallsSection(live: live)
                 }
                 VoiceSection()
                 Section {
@@ -176,5 +180,88 @@ private final class VoicePreview {
     func stop() {
         player.stop()
         playing = nil
+    }
+}
+
+/// The live call plan: minutes left, the subscription and its buttons.
+private struct LiveCallsSection: View {
+    @Environment(AppModel.self) private var model
+    let live: RelayStatus.Live
+    @State private var managing = false
+
+    private var purchases: Purchases { model.purchases }
+
+    private static func minutes(_ seconds: Int) -> String {
+        "\(Int((Double(seconds) / 60).rounded(.down))) min"
+    }
+
+    var body: some View {
+        Section {
+            LabeledContent("Plan", value: planName)
+            LabeledContent("Minutes Left") {
+                if let seconds = live.secondsLeft {
+                    Text(Self.minutes(seconds))
+                } else {
+                    Image(systemName: "infinity").accessibilityLabel("Unlimited")
+                }
+            }
+            if let sub = live.subscription, sub.active, live.unlimited != true {
+                LabeledContent("Used This Period", value: "\(Self.minutes(sub.secondsUsed)) of \(Self.minutes(sub.secondsTotal))")
+                if let date = sub.expires {
+                    LabeledContent(sub.autoRenew == false ? "Ends" : "Renews", value: date.formatted(date: .abbreviated, time: .omitted))
+                }
+            }
+            if let bonus = live.bonusSeconds, bonus > 0, live.unlimited != true {
+                LabeledContent("Bonus Minutes", value: Self.minutes(bonus))
+            }
+            if live.billing && live.unlimited != true {
+                if live.subscription?.active != true {
+                    ForEach(purchases.products, id: \.id) { product in
+                        Button {
+                            Task { await purchases.buy(product) }
+                        } label: {
+                            LabeledContent(product.displayName, value: "\(product.displayPrice) / \(period(product))")
+                        }
+                        .disabled(purchases.isWorking)
+                    }
+                }
+                if live.subscription != nil {
+                    Button("Manage Subscription") { managing = true }
+                }
+                Button("Restore Purchases") { Task { await purchases.restore() } }
+                    .disabled(purchases.isWorking)
+            }
+            if let error = purchases.errorMessage {
+                Text(error).foregroundStyle(.red)
+            }
+        } header: {
+            Text("Live Calls")
+        } footer: {
+            if live.billing && live.unlimited != true {
+                Text("Minutes renew each period and do not carry over. The subscription belongs to your Apple ID and moves with you to another account key.")
+            }
+        }
+        .manageSubscriptionsSheet(isPresented: $managing)
+    }
+
+    private var planName: String {
+        if live.unlimited == true { return "Unlimited" }
+        if let sub = live.subscription, sub.active {
+            let name = purchases.products.first { $0.id == sub.productID }?.displayName ?? "Subscription"
+            return sub.sandbox ? "\(name) (Test)" : name
+        }
+        if (live.bonusSeconds ?? 0) > 0 { return "Free Minutes" }
+        return "None"
+    }
+
+    private func period(_ product: Product) -> String {
+        guard let unit = product.subscription?.subscriptionPeriod.unit else { return "" }
+        switch unit {
+        case .day: return "day"
+        case .week: return "week"
+        case .month: return "month"
+        case .year: return "year"
+        @unknown default: return ""
+        }
     }
 }

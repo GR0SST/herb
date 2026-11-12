@@ -458,7 +458,7 @@ describe("minutes", () => {
   test("time is charged and the call ends when it runs out", async () => {
     store.addLiveSeconds(accountId, 120);
     const status = (await (await req("/v1/status", devToken)).json()) as { live: unknown };
-    expect(status.live).toEqual({ available: true, billing: true, seconds_left: 120 });
+    expect(status.live).toMatchObject({ available: true, billing: true, unlimited: false, seconds_left: 120, subscription: null });
 
     const first = (await callAgent()).body.call.id;
     clock += 30_000;
