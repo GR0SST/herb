@@ -353,6 +353,14 @@ export function createLive(options: LiveOptions) {
     deliverEnded(live.bot, event(live, "call.ended", { reason, duration_s: duration, transcript: live.transcript }));
   }
 
+  /** Ends a call from our side: the voice agent is told to stop. */
+  function hangup(callId: string, reason: EndReason) {
+    const live = calls.get(callId);
+    if (!live) return;
+    withVoice(live, (voice) => voice.hangup(reason));
+    end(callId, reason);
+  }
+
   function controls(callId: string): CallControls {
     return {
       ask: (question) => ask(callId, question),
@@ -365,8 +373,7 @@ export function createLive(options: LiveOptions) {
   function tick() {
     for (const [id, live] of [...calls]) {
       if (live.budget !== null && now() - live.startedAt >= live.budget * 1000) {
-        withVoice(live, (voice) => voice.hangup("no_minutes"));
-        end(id, "no_minutes");
+        hangup(id, "no_minutes");
         continue;
       }
       for (const [askId, at] of live.asks) {
@@ -388,8 +395,7 @@ export function createLive(options: LiveOptions) {
       return fail(404, "not_found", "Call not found");
     }
     if (action === "hangup") {
-      withVoice(live, (voice) => voice.hangup("agent_hung_up"));
-      end(callId, "agent_hung_up");
+      hangup(callId, "agent_hung_up");
       return { status: 200, body: { ok: true } };
     }
     if (action === "answer") {
@@ -451,6 +457,7 @@ export function createLive(options: LiveOptions) {
     attachVoice,
     controls,
     end,
+    hangup,
     tick,
     act,
     attachListener,

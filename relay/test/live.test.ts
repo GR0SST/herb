@@ -300,6 +300,7 @@ describe("during a call", () => {
   test("phone hangs up", async () => {
     expect((await req(`/v1/calls/${callId}/end`, devToken, { body: {} })).status).toBe(200);
     expect(store.call(callId)!.ended_reason).toBe("user_hung_up");
+    expect(call.log).toEqual(["hangup:user_hung_up"]);
     expect((await callAgent()).status).toBe(201);
   });
 

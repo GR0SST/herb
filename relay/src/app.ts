@@ -519,7 +519,7 @@ export function createApp(options: AppOptions) {
       }
       if (action === "end" && method === "POST") {
         if (!device) return err(403, "forbidden", "Only for phones");
-        live.end(call.id, "user_hung_up");
+        live.hangup(call.id, "user_hung_up");
         return Response.json(publicCall(store.call(call.id)!));
       }
       if (action === "audio" && method === "GET") {

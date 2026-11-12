@@ -1,6 +1,6 @@
 # Live calls
 
-> **Draft.** The server side of this protocol is implemented. The speech model and the iPhone app are not connected yet, so live calls return `503 live_unavailable` for now. Names may still change.
+> **Draft.** The server side is implemented and runs on [GPT-Live](https://developers.openai.com/api/docs/guides/live). The iPhone app does not support live calls yet. Names may still change.
 
 In a live call you and a voice agent talk at the same time and can interrupt each other. The voice agent runs in Herb. It is not your main agent: it is a front that talks to you and asks your main agent (Codex, Claude Code, OpenClaw, a script, anything) through **events**.
 
@@ -224,7 +224,7 @@ Starting a live call without minutes returns `402 no_minutes`. One-way calls sta
 
 The subscription belongs to your Apple ID, not to your key. If you sign in with another key on the phone, the subscription and remaining minutes move to the new account.
 
-**Self-hosted:** minutes are off unless you set `HERB_BILLING=true`, so live calls have no limit. You pay the speech model provider directly. With billing on, add minutes with `bun run cli minutes <account-key> <minutes>`. To send webhooks to your own network, set `HERB_ALLOW_PRIVATE_WEBHOOKS=true`.
+**Self-hosted:** set `OPENAI_API_KEY` to turn live calls on. Minutes are off unless you set `HERB_BILLING=true`, so live calls have no limit. You pay the speech model provider directly. With billing on, add minutes with `bun run cli minutes <account-key> <minutes>`. To send webhooks to your own network, set `HERB_ALLOW_PRIVATE_WEBHOOKS=true`.
 
 ## Agent settings
 
@@ -248,9 +248,11 @@ For the iPhone app, with a phone token:
 
 | Request | Effect |
 |---|---|
-| `POST /v1/live` `{"bot_id": "..."}` | Call an agent. Returns the call and the speech model connection. |
-| `POST /v1/calls/{id}/live` | Join an agent's live call after answering it. |
+| `POST /v1/live` `{"bot_id": "...", "sdp": "<WebRTC offer>"}` | Call an agent. Returns `call` and `voice: {session_id, sdp}` with the WebRTC answer. |
+| `POST /v1/calls/{id}/live` `{"sdp": "<WebRTC offer>"}` | Join an agent's live call after answering it. Same response. |
 | `POST /v1/calls/{id}/end` | Hang up. |
 | `GET /v1/status` | `live.available`, `live.billing`, `live.seconds_left`. |
 
 The VoIP push for a live call has `"live": true`.
+
+The phone connects to GPT-Live over WebRTC: it creates the offer with an `oai-events` data channel and sets the returned SDP as the answer. The OpenAI key stays on the server. The data channel only receives transcripts and session events, and the phone cannot send commands on it. The server controls the session over a sideband connection.

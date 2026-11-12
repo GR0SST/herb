@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ApnsSender } from "./apns";
 import { createApp, MAX_BODY_BYTES } from "./app";
+import { createGptLive } from "./gptlive";
 import { Store } from "./db";
 import { createOAuth } from "./oauth";
 
@@ -33,8 +34,8 @@ const app = createApp({
   oauth,
   publicUrl: HERB_PUBLIC_URL,
   openRegistration: HERB_OPEN_REGISTRATION !== "false",
-  // The speech model is connected in a later step: until then live calls report unavailable.
-  voice: null,
+  // Without an OpenAI key live calls report unavailable.
+  voice: process.env.OPENAI_API_KEY ? createGptLive({ apiKey: process.env.OPENAI_API_KEY, voice: process.env.HERB_LIVE_VOICE }) : null,
   billing: process.env.HERB_BILLING === "true",
   allowPrivateWebhooks: process.env.HERB_ALLOW_PRIVATE_WEBHOOKS === "true",
 });
