@@ -119,11 +119,17 @@ private struct VoiceSection: View {
                     .font(.subheadline)
                 }
             case .ready:
-                ForEach(SpeechVoice.all) { option in
-                    VoiceRow(option: option, selected: selected == option.id, playing: preview.playing == option.id) {
-                        selected = option.id
-                        preview.play(option)
+                Picker("Voice", selection: $selected) {
+                    ForEach(SpeechVoice.all) { option in
+                        Text("\(option.name) · \(option.detail)").tag(option.id)
                     }
+                }
+                .pickerStyle(.menu)
+                .onChange(of: selected) { preview.play(SpeechVoice.selected) }
+                Button {
+                    preview.playing == nil ? preview.play(SpeechVoice.selected) : preview.stop()
+                } label: {
+                    Label(preview.playing == nil ? "Play Sample" : "Stop", systemImage: preview.playing == nil ? "play.fill" : "stop.fill")
                 }
                 Button("Delete Voice", role: .destructive) { confirmDelete = true }
             case .failed(let message):
@@ -144,33 +150,6 @@ private struct VoiceSection: View {
             Text("Messages will be read with the iOS voice until you download it again.")
         }
         .onDisappear { preview.stop() }
-    }
-}
-
-private struct VoiceRow: View {
-    let option: SpeechVoice
-    let selected: Bool
-    let playing: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(option.name).foregroundStyle(.primary)
-                    Text(option.detail).font(.footnote).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if playing {
-                    Image(systemName: "speaker.wave.2.fill").foregroundStyle(.secondary)
-                }
-                if selected {
-                    Image(systemName: "checkmark").foregroundStyle(Color.accentColor).fontWeight(.semibold)
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
