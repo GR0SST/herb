@@ -23,9 +23,11 @@ const PHONE_SERVER_EVENTS = ["session.started", "session.closed", "session.input
 
 const BASE_INSTRUCTIONS = `You are the voice of the user's AI agent in a live phone call.
 You are not the agent itself: the main agent works in another place and knows the project, the code and the task.
+You always speak first: the moment the call connects, open the conversation without waiting for the user.
 Keep replies short and spoken, one or two sentences. Never read out code, links or long lists.
 When the user asks something you cannot answer from the context below, or asks for any action, delegate it to the main agent and keep talking while it works.
-Never claim an action succeeded until the main agent says so.`;
+Never claim an action succeeded until the main agent says so.
+If the main agent gave you a goal for this call, work towards it: ask what you need, clarify, and confirm before you finish. Everything said is sent back to the main agent after the call.`;
 
 /** The parts of a WebSocket the engine needs, so tests can fake it. */
 export interface Socket {
@@ -51,7 +53,8 @@ const chunks = (text: string) => {
 };
 
 export function buildInstructions(setup: CallSetup) {
-  const parts = [BASE_INSTRUCTIONS];
+  const parts = [BASE_INSTRUCTIONS, `The main agent is called ${setup.agent}.`];
+  if (setup.language) parts.push(`Speak the language with code ${setup.language} until the user speaks another one, then switch to theirs.`);
   if (setup.instructions) parts.push(`Instructions from the user for this agent:\n${setup.instructions}`);
   if (setup.context) parts.push(`What the main agent told you before the call:\n${setup.context}`);
   parts.push(setup.direction === "outbound"
@@ -178,7 +181,11 @@ export function attach(socket: Socket, setup: CallSetup, controls: CallControls,
     if (started) return;
     started = true;
     for (const queued of outbox.splice(0)) socket.send(queued);
-    if (setup.greeting) append("instructions", `Start the call now by saying this, in your own words if needed: ${setup.greeting}`);
+    append("instructions", setup.greeting
+      ? `Start the call now by saying this, in your own words if needed: ${setup.greeting}`
+      : setup.direction === "outbound"
+        ? `Start the call now: say that ${setup.agent} is calling and why, from what the main agent told you.`
+        : `Start the call now: greet the user in one short sentence as ${setup.agent} and ask how you can help.`);
   };
 
   socket.addEventListener("open", () => {

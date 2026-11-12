@@ -24,7 +24,7 @@ class FakeSocket implements Socket {
   }
 }
 
-const setup: CallSetup = { direction: "inbound", context: "Billing thread", instructions: "Be brief", greeting: null };
+const setup: CallSetup = { direction: "inbound", agent: "Codex", language: null, context: "Billing thread", instructions: "Be brief", greeting: null };
 let socket: FakeSocket;
 let lines: TranscriptLine[];
 let ended: EndReason[];
@@ -100,9 +100,12 @@ describe("session setup", () => {
     expect(engine.open({ ...input, body: { sdp: "x" } })).rejects.toThrow("400");
   });
 
-  test("instructions carry the context and the direction", () => {
+  test("instructions carry the context, direction, agent and language", () => {
     expect(buildInstructions({ ...setup, direction: "outbound" })).toContain("The main agent called the user");
     expect(buildInstructions({ ...setup, context: "" })).not.toContain("before the call");
+    expect(buildInstructions(setup)).toContain("You always speak first");
+    expect(buildInstructions(setup)).toContain("called Codex");
+    expect(buildInstructions({ ...setup, language: "uk" })).toContain("code uk");
   });
 });
 
@@ -166,8 +169,15 @@ describe("sideband", () => {
 
   test("long text is split into appends", () => {
     const session = started();
+    socket.sent = [];
     session.say("x".repeat(3200), false);
     expect(socket.types()).toEqual(["session.commentary.append", "session.commentary.append", "session.commentary.append"]);
+  });
+
+  test("the voice agent always opens the call", () => {
+    started();
+    expect(socket.sent[0]).toMatchObject({ type: "session.instructions.append" });
+    expect(String(socket.sent[0]!.content)).toContain("greet the user in one short sentence as Codex");
   });
 
   test("the user hanging up ends the call once", () => {

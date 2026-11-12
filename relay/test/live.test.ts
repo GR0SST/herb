@@ -206,6 +206,8 @@ describe("starting live calls", () => {
     expect(body.call.status).toBe("answered");
     expect(opened[0]!.setup).toEqual({
       direction: "inbound",
+      agent: "Codex",
+      language: null,
       context: "Thread about billing",
       instructions: "Saved rules\n\nBe brief",
       greeting: "Hi, billing thread",
@@ -254,6 +256,27 @@ describe("starting live calls", () => {
     expect((await req("/v1/call", botToken, { body: { live: true, text: "x" } })).status).toBe(503);
     const status = (await (await req("/v1/status", devToken)).json()) as { live: { available: boolean } };
     expect(status.live.available).toBe(false);
+  });
+
+  test("the calling agent's context and the phone's language reach the voice agent", async () => {
+    await setWebhook();
+    hookReply = () => json({ context: "From the handler" });
+    const placed = (await (await req("/v1/call", botToken, {
+      body: { live: true, text: "Quick question about the deploy", context: "Ask whether to roll back. I need a yes or no." },
+    })).json()) as { id: string };
+    await req(`/v1/calls/${placed.id}/live`, devToken, { body: { language: "uk" } });
+    expect(opened[0]!.setup.context).toBe("Ask whether to roll back. I need a yes or no.\n\nFrom the handler");
+    expect(opened[0]!.setup.language).toBe("uk");
+    expect((await req("/v1/call", botToken, { body: { live: true, context: "x".repeat(16_001) } })).status).toBe(400);
+  });
+
+  test("the transcript is kept and returned with the call", async () => {
+    const callId = (await callAgent()).body.call.id;
+    opened[0]!.controls.transcript({ role: "agent", text: "Roll back?" });
+    opened[0]!.controls.transcript({ role: "user", text: "Yes" });
+    opened[0]!.controls.end("user_hung_up");
+    const status = (await (await req(`/v1/calls/${callId}`, botToken)).json()) as { transcript: unknown };
+    expect(status.transcript).toEqual([{ role: "agent", text: "Roll back?" }, { role: "user", text: "Yes" }]);
   });
 
   test("a one-way call cannot go live", async () => {

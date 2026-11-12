@@ -47,6 +47,10 @@ export interface Call {
   live: number;
   ended_reason: string | null;
   duration_s: number | null;
+  /** What the calling agent told the voice agent for a live call. */
+  live_context: string | null;
+  /** JSON list of {role, text} after a live call. */
+  transcript: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -85,7 +89,7 @@ function newAccountKey() {
 
 const BOT_COLUMNS = "id, account_id, name, chat_url, chat_key_env, chat_model, live_instructions, webhook_url, webhook_secret";
 const DEVICE_COLUMNS = "id, account_id, name, voip_token, environment, created_at";
-const CALL_SELECT = `SELECT c.id, c.bot_id, b.name AS bot_name, c.title, c.text, c.language, c.audio_mime, c.status, c.live, c.ended_reason, c.duration_s, c.created_at, c.updated_at
+const CALL_SELECT = `SELECT c.id, c.bot_id, b.name AS bot_name, c.title, c.text, c.language, c.audio_mime, c.status, c.live, c.ended_reason, c.duration_s, c.live_context, c.transcript, c.created_at, c.updated_at
   FROM calls c JOIN bots b ON b.id = c.bot_id`;
 
 export class Store {
@@ -133,6 +137,9 @@ export class Store {
       this.db.run("ALTER TABLE calls ADD COLUMN live INTEGER NOT NULL DEFAULT 0");
       this.db.run("ALTER TABLE calls ADD COLUMN ended_reason TEXT");
       this.db.run("ALTER TABLE calls ADD COLUMN duration_s INTEGER");
+    }
+    for (const column of ["live_context", "transcript"]) {
+      if (!callColumns.some((c) => c.name === column)) this.db.run(`ALTER TABLE calls ADD COLUMN ${column} TEXT`);
     }
     // Paid live call time left, in seconds.
     this.db.run(`CREATE TABLE IF NOT EXISTS live_balance (
@@ -345,6 +352,7 @@ export class Store {
     audioBytes?: number;
     idempotencyKey?: string;
     live?: boolean;
+    liveContext?: string;
     /** A call started from the phone is answered from the start. */
     status?: "ringing" | "answered";
     now: number;
@@ -352,11 +360,12 @@ export class Store {
     const id = randomUUID();
     this.db
       .query(
-        `INSERT INTO calls (id, bot_id, title, text, language, audio_mime, audio_bytes, status, idempotency_key, live, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO calls (id, bot_id, title, text, language, audio_mime, audio_bytes, status, idempotency_key, live, live_context, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(id, input.botId, input.title ?? null, input.text ?? null, input.language ?? null, input.audioMime ?? null,
-        input.audioBytes ?? 0, input.status ?? "ringing", input.idempotencyKey ?? null, input.live ? 1 : 0, input.now, input.now);
+        input.audioBytes ?? 0, input.status ?? "ringing", input.idempotencyKey ?? null, input.live ? 1 : 0, input.liveContext ?? null,
+        input.now, input.now);
     return this.call(id)!;
   }
 
@@ -389,9 +398,11 @@ export class Store {
     return true;
   }
 
-  endLiveCall(id: string, reason: string, durationS: number, now: number) {
+  endLiveCall(id: string, reason: string, durationS: number, now: number, transcript: unknown[] = []) {
     if (!this.transition(id, reason === "failed" ? "failed" : "ended", now)) return false;
-    this.db.query("UPDATE calls SET ended_reason = ?, duration_s = ? WHERE id = ?").run(reason, durationS, id);
+    this.db
+      .query("UPDATE calls SET ended_reason = ?, duration_s = ?, transcript = ? WHERE id = ?")
+      .run(reason, durationS, transcript.length ? JSON.stringify(transcript) : null, id);
     return true;
   }
 

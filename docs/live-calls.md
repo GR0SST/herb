@@ -33,6 +33,8 @@ curl https://herb.grosst.cc/v1/call \
   -d '{"live":true,"title":"Deploy failed","text":"The deploy failed on migrations. Want me to roll back?"}'
 ```
 
+Add `context` (up to 16,000 characters) with everything the voice agent needs: what happened, what to ask or decide, what you need back. It is not read out. After the call, `GET /v1/calls/<id>` (or `phone_call_status`) returns the `transcript`, so an agent without a handler still gets the result.
+
 The phone rings as usual. When you answer, the voice agent opens with `text`, then the call goes on as a conversation. Herb sends `call.started` with `direction: "outbound"`. If the call is declined or missed, nothing more is sent.
 
 A live call has `"live": true`. It ends with status `ended` (or `failed`) and gets `ended_reason` and `duration_s`. An account has one live call at a time: a second one returns `409 call_in_progress`.

@@ -90,7 +90,9 @@ const publicCall = (call: Call) => ({
   has_audio: call.audio_mime !== null,
   status: call.status,
   live: call.live === 1,
-  ...(call.live ? { ended_reason: call.ended_reason, duration_s: call.duration_s } : {}),
+  ...(call.live
+    ? { ended_reason: call.ended_reason, duration_s: call.duration_s, transcript: call.transcript ? (JSON.parse(call.transcript) as unknown[]) : null }
+    : {}),
   created_at: call.created_at,
   updated_at: call.updated_at,
 });
@@ -193,9 +195,11 @@ export function createApp(options: AppOptions) {
     const key = typeof args.idempotency_key === "string" && args.idempotency_key ? args.idempotency_key.slice(0, 200) : undefined;
     const reject = (code: string, message: string, status = 400) => ({ status, body: { error: { code, message } } });
     const isLive = args.live === true;
+    const liveContext = typeof args.context === "string" ? args.context.trim() : "";
     if (isLive) {
       if (!liveFor(bot.account_id)) return reject("live_unavailable", "Live calls are not available on this server", 503);
       if (audioB64) return reject("invalid_content", "A live call takes text, not audio");
+      if (liveContext.length > LIVE_LIMITS.context) return reject("context_too_long", `Context is longer than ${LIVE_LIMITS.context} characters`);
       const blocked = live.canStart(bot.account_id);
       if (blocked === "no_minutes") return reject("no_minutes", "No live call minutes left", 402);
     }
@@ -236,6 +240,7 @@ export function createApp(options: AppOptions) {
       audioBytes: audio?.length,
       idempotencyKey: key,
       live: isLive,
+      liveContext: isLive && liveContext ? liveContext : undefined,
       now: now(),
     });
     if (audio) await Bun.write(audioPath(call.id), audio);
@@ -315,7 +320,9 @@ export function createApp(options: AppOptions) {
   /** Connects an answered live call to the speech model. */
   async function connectLive(call: Call, bot: Bot, direction: Direction, request: Request) {
     const body = (await readJson<Record<string, unknown>>(request)) ?? {};
-    const setup = await live.start(call, bot, direction);
+    // The phone sends its language, so the voice agent opens in it.
+    const language = typeof body.language === "string" && /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(body.language) ? body.language : null;
+    const setup = await live.start(call, bot, direction, language);
     try {
       const opened = await voice!.open({ call, bot, setup, controls: live.controls(call.id), body });
       live.attachVoice(call.id, opened.session);

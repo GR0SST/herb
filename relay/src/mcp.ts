@@ -6,7 +6,7 @@ export const MCP_TOOLS = [
     title: "Call my phone",
     annotations: { title: "Call my phone", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     description:
-      "Call the user's iPhone. With text, the phone speaks it after they answer. Without text, it just rings. One-way: the user cannot reply by voice. Call only when the user asked or set up the rule in advance.",
+      "Call the user's iPhone. Two modes. Message (default): the phone speaks text after they answer, or just rings without text; the user cannot reply. Conversation (live: true, where enabled): a voice agent talks with the user on your behalf, opens with text, works towards the goal in context, asks and clarifies, and passes questions back to you while the call runs; afterwards phone_call_status returns the transcript. Call only when the user asked or set up the rule in advance.",
     inputSchema: {
       type: "object",
       properties: {
@@ -19,7 +19,11 @@ export const MCP_TOOLS = [
         idempotency_key: { type: "string", description: "One key per event, so a retry does not ring twice." },
         live: {
           type: "boolean",
-          description: "true for a two-way live call: a voice agent opens with text and the user can talk back. Only where live calls are enabled for the user.",
+          description: "true for a conversation instead of a message. Only where live calls are enabled for the user.",
+        },
+        context: {
+          type: "string",
+          description: "Conversation only: everything the voice agent needs, up to 16000 characters. What happened, what to ask or decide with the user, what you need back. The user does not hear it read out.",
         },
       },
       additionalProperties: false,

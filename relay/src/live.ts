@@ -36,6 +36,10 @@ export interface VoiceEngine {
 
 export interface CallSetup {
   direction: Direction;
+  /** The agent the user called or was called by. */
+  agent: string;
+  /** Language to speak until the user speaks another, such as the phone's language. */
+  language: string | null;
   context: string;
   instructions: string;
   /** First line of the voice agent. For an outbound call it is the agent's message. */
@@ -280,7 +284,7 @@ export function createLive(options: LiveOptions) {
   }
 
   /** Registers an answered call and asks the handler for context. */
-  async function start(call: Call, bot: Bot, direction: Direction): Promise<CallSetup> {
+  async function start(call: Call, bot: Bot, direction: Direction, language: string | null = null): Promise<CallSetup> {
     const live: LiveCall = {
       call,
       bot,
@@ -300,7 +304,10 @@ export function createLive(options: LiveOptions) {
     const extra = text(reply?.instructions, LIVE_LIMITS.instructions);
     return {
       direction,
-      context: text(reply?.context, LIVE_LIMITS.context),
+      agent: bot.name,
+      language: language ?? call.language,
+      // The calling agent's context first, then what the handler adds.
+      context: [call.live_context ?? "", text(reply?.context, LIVE_LIMITS.context)].filter(Boolean).join("\n\n"),
       instructions: [bot.live_instructions ?? "", extra].filter(Boolean).join("\n\n"),
       greeting: direction === "outbound" ? call.text : text(reply?.greeting, LIVE_LIMITS.greeting) || null,
     };
@@ -359,7 +366,7 @@ export function createLive(options: LiveOptions) {
     calls.delete(callId);
     const duration = Math.max(0, Math.ceil((now() - live.startedAt) / 1000));
     if (billing) store.addLiveSeconds(live.bot.account_id, -duration);
-    store.endLiveCall(callId, reason, duration, now());
+    store.endLiveCall(callId, reason, duration, now(), live.transcript);
     deliverEnded(live.bot, event(live, "call.ended", { reason, duration_s: duration, transcript: live.transcript }));
   }
 
