@@ -95,6 +95,34 @@ struct API {
         _ = try await send(request("v1/bots/\(id)", method: "DELETE"))
     }
 
+    /// The phone calls an agent: the server returns the call and GPT-Live's WebRTC answer.
+    func startLive(botID: String, sdp: String) async throws -> LiveStart {
+        struct Body: Encodable { let bot_id: String; let sdp: String }
+        var req = try request("v1/live", method: "POST", body: Body(bot_id: botID, sdp: sdp))
+        // The server first asks the agent's handler for context.
+        req.timeoutInterval = 30
+        return try JSONDecoder().decode(LiveStart.self, from: await send(req))
+    }
+
+    /// Joins an agent's live call after answering it.
+    func joinLive(callID: String, sdp: String) async throws -> LiveStart {
+        struct Body: Encodable { let sdp: String }
+        var req = try request("v1/calls/\(callID)/live", method: "POST", body: Body(sdp: sdp))
+        req.timeoutInterval = 30
+        return try JSONDecoder().decode(LiveStart.self, from: await send(req))
+    }
+
+    func endLive(callID: String) async throws {
+        _ = try await send(request("v1/calls/\(callID)/end", method: "POST"))
+    }
+
+    /// Sends only changed fields: a nil value clears the setting. A new webhook URL returns its secret, shown once.
+    func updateAgent(id: String, changes: [String: String?]) async throws -> String? {
+        struct Reply: Decodable { let webhook_secret: String? }
+        let data = try await send(request("v1/bots/\(id)", method: "PATCH", body: changes))
+        return try JSONDecoder().decode(Reply.self, from: data).webhook_secret
+    }
+
     func status() async throws -> RelayStatus {
         try JSONDecoder().decode(RelayStatus.self, from: await send(request("v1/status")))
     }

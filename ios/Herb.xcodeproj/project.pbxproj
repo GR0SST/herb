@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		96623D93309CC89900283970 /* onnxruntime in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000012 /* onnxruntime */; };
+		96623D93309CC89900283971 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000022 /* WebRTC */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				96623D93309CC89900283970 /* onnxruntime in Frameworks */,
+				96623D93309CC89900283971 /* WebRTC in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +73,7 @@
 			name = Herb;
 			packageProductDependencies = (
 				A10000000000000000000012 /* onnxruntime */,
+				A10000000000000000000022 /* WebRTC */,
 			);
 			productName = Herb;
 			productReference = A10000000000000000000001 /* Herb.app */;
@@ -98,6 +101,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A10000000000000000000011 /* XCRemoteSwiftPackageReference "onnxruntime-swift-package-manager" */,
+				A10000000000000000000021 /* XCRemoteSwiftPackageReference "WebRTC" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A10000000000000000000005 /* Products */;
@@ -260,6 +264,14 @@
 				version = 1.20.0;
 			};
 		};
+		A10000000000000000000021 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stasel/WebRTC.git";
+			requirement = {
+				kind = exactVersion;
+				version = 157.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -267,6 +279,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A10000000000000000000011 /* XCRemoteSwiftPackageReference "onnxruntime-swift-package-manager" */;
 			productName = onnxruntime;
+		};
+		A10000000000000000000022 /* WebRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000021 /* XCRemoteSwiftPackageReference "WebRTC" */;
+			productName = WebRTC;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

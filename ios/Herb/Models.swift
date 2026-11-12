@@ -6,9 +6,22 @@ struct Bot: Codable, Identifiable, Hashable {
         let calls: Bool
     }
 
+    /// Live call settings. Missing on servers without live calls.
+    struct Live: Codable, Hashable {
+        let instructions: String?
+        let webhookURL: String?
+        let listener: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case instructions, listener
+            case webhookURL = "webhook_url"
+        }
+    }
+
     let id: String
     let name: String
     let capabilities: Capabilities
+    let live: Live?
 }
 
 enum CallStatus: String, Codable {
@@ -36,12 +49,14 @@ struct CallRecord: Codable, Identifiable, Hashable {
     let language: String?
     let hasAudio: Bool
     let status: CallStatus
+    /// A two-way call. Missing on older servers.
+    let live: Bool?
     let createdAt: Double
 
     var date: Date { Date(timeIntervalSince1970: createdAt / 1000) }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, text, language, status
+        case id, title, text, language, status, live
         case botId = "bot_id"
         case botName = "bot_name"
         case hasAudio = "has_audio"
@@ -63,11 +78,24 @@ extension String {
 }
 
 struct RelayStatus: Codable {
+    struct Live: Codable {
+        let available: Bool
+        let billing: Bool
+        let secondsLeft: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case available, billing
+            case secondsLeft = "seconds_left"
+        }
+    }
+
     let pushEnabled: Bool
     let pushRegistered: Bool
     let mcpURL: String?
+    let live: Live?
 
     enum CodingKeys: String, CodingKey {
+        case live
         case pushEnabled = "push_enabled"
         case pushRegistered = "push_registered"
         case mcpURL = "mcp_url"
@@ -76,6 +104,12 @@ struct RelayStatus: Codable {
 
 struct NewAgent: Codable {
     let token: String
+}
+
+struct LiveStart: Decodable {
+    struct Voice: Decodable { let sdp: String }
+    let call: CallRecord
+    let voice: Voice
 }
 
 

@@ -86,11 +86,14 @@ struct AgentsView: View {
                 }
             }
             .navigationDestination(for: Bot.self) { bot in
-                if bot.capabilities.chat, let api = model.api {
-                    ChatView(bot: bot, api: api)
-                } else {
-                    CallsView(bot: bot)
+                Group {
+                    if bot.capabilities.chat, let api = model.api {
+                        ChatView(bot: bot, api: api)
+                    } else {
+                        CallsView(bot: bot)
+                    }
                 }
+                .toolbar { AgentToolbar(bot: bot) }
             }
             .refreshable { await model.refresh() }
             .sheet(isPresented: $addingAgent) { ConnectAgentView() }

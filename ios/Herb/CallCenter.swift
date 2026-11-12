@@ -6,6 +6,8 @@ import PushKit
 struct CallSession: Identifiable, Equatable {
     enum Phase: Equatable {
         case ringing, connecting, playing
+        /// A two-way conversation is going on.
+        case live
         /// The message is over, but the line stays open until the person hangs up.
         case waiting(String)
         case ended(String)
@@ -17,6 +19,22 @@ struct CallSession: Identifiable, Equatable {
     let startedAt = Date()
     var text: String?
     var phase: Phase = .ringing
+    var live = false
+    /// The phone called the agent, not the other way round.
+    var outgoing = false
+    var botID: String?
+    /// The server's call id when it differs from the CallKit id, as for calls the phone starts.
+    var serverID: String?
+    var lines: [Line] = []
+    var muted = false
+
+    var relayID: String { serverID ?? id.uuidString.lowercased() }
+
+    struct Line: Identifiable, Equatable {
+        let id = UUID()
+        let speaker: LiveConnection.Speaker
+        var text: String
+    }
 }
 
 /// Calls: VoIP push, CallKit and message playback.
@@ -38,6 +56,7 @@ final class CallCenter: NSObject {
     @ObservationIgnored private var known: Set<UUID> = []
     @ObservationIgnored private var audioActive = false
     @ObservationIgnored private var pending: (id: UUID, message: Message)?
+    @ObservationIgnored private var liveCall: (id: UUID, connection: LiveConnection)?
 
     private enum Message {
         case text(String, language: String?)
@@ -76,6 +95,7 @@ final class CallCenter: NSObject {
     }
 
     func start() {
+        LiveConnection.useCallKitAudio(useCallKit)
         registry.delegate = self
         registry.desiredPushTypes = [.voIP]
     }
@@ -83,13 +103,13 @@ final class CallCenter: NSObject {
     /// A call found by polling while the app is open.
     func reportIfNew(_ record: CallRecord) {
         guard let id = UUID(uuidString: record.id), !known.contains(id) else { return }
-        report(id: id, botName: record.botName, title: record.title) {}
+        report(id: id, botName: record.botName, title: record.title, live: record.live ?? false) {}
     }
 
-    private func report(id: UUID, botName: String, title: String?, completion: @escaping () -> Void) {
+    private func report(id: UUID, botName: String, title: String?, live: Bool = false, completion: @escaping () -> Void) {
         known.insert(id)
         if sessions[id] == nil {
-            sessions[id] = CallSession(id: id, botName: botName, title: title)
+            sessions[id] = CallSession(id: id, botName: botName, title: title, live: live)
         }
         guard useCallKit else {
             scheduleTimeout(id)
@@ -123,7 +143,7 @@ final class CallCenter: NSObject {
 
     /// Starts speech while the phone rings, so the first phrase is ready on answer.
     private func prepareMessage(_ id: UUID) {
-        guard let api = api() else { return }
+        guard let api = api(), sessions[id]?.live == false else { return }
         Task { [weak self] in
             guard let record = try? await api.call(id: id), let self, self.sessions[id]?.phase == .ringing,
                   !record.hasAudio, let text = record.text
@@ -142,6 +162,39 @@ final class CallCenter: NSObject {
     }
 
     // MARK: In-app call buttons
+
+    /// The phone calls an agent for a two-way conversation.
+    func callAgent(_ bot: Bot) {
+        guard active == nil else { return }
+        let id = UUID()
+        known.insert(id)
+        var session = CallSession(id: id, botName: bot.name, title: nil, live: true, outgoing: true, botID: bot.id)
+        session.phase = .connecting
+        sessions[id] = session
+        guard useCallKit else {
+            beginAnswer(id)
+            sessionDidActivate()
+            return
+        }
+        let action = CXStartCallAction(call: id, handle: CXHandle(type: .generic, value: bot.name))
+        controller.request(CXTransaction(action: action)) { [weak self] error in
+            guard error != nil else { return }
+            Task { @MainActor in self?.finish(id, relayStatus: nil, note: "Could not start the call") }
+        }
+    }
+
+    func setMuted(_ id: UUID, _ muted: Bool) {
+        if useCallKit {
+            controller.request(CXTransaction(action: CXSetMutedCallAction(call: id, muted: muted))) { _ in }
+        } else {
+            applyMute(id, muted)
+        }
+    }
+
+    private func applyMute(_ id: UUID, _ muted: Bool) {
+        sessions[id]?.muted = muted
+        if liveCall?.id == id { liveCall?.connection.muted = muted }
+    }
 
     func answer(_ id: UUID) {
         if useCallKit {
@@ -173,7 +226,60 @@ final class CallCenter: NSObject {
             finishAfterFailure(id, "Could not set up audio")
             return
         }
-        Task { await loadMessage(id) }
+        if sessions[id]?.live == true {
+            Task { await connectLive(id) }
+        } else {
+            Task { await loadMessage(id) }
+        }
+    }
+
+    private func connectLive(_ id: UUID) async {
+        guard let api = api(), let session = sessions[id] else {
+            finishAfterFailure(id, "No connection to the server")
+            return
+        }
+        let connection = LiveConnection()
+        connection.muted = session.muted
+        connection.onTranscript = { [weak self] speaker, delta in self?.hear(id, speaker, delta) }
+        connection.onEnded = { [weak self] note in
+            self?.finish(id, relayStatus: nil, note: note)
+            self?.endSystemCall(id)
+        }
+        liveCall = (id, connection)
+        do {
+            let offer = try await connection.makeOffer()
+            let started = if session.outgoing, let botID = session.botID {
+                try await api.startLive(botID: botID, sdp: offer)
+            } else {
+                try await api.joinLive(callID: session.relayID, sdp: offer)
+            }
+            sessions[id]?.serverID = started.call.id
+            guard sessions[id]?.phase == .connecting else {
+                // Hung up while connecting.
+                connection.close()
+                try? await api.endLive(callID: started.call.id)
+                return
+            }
+            try await connection.accept(answer: started.voice.sdp)
+            sessions[id]?.phase = .live
+            if useCallKit && session.outgoing { provider.reportOutgoingCall(with: id, connectedAt: nil) }
+        } catch {
+            connection.close()
+            finishAfterFailure(id, error.localizedDescription)
+        }
+    }
+
+    /// Transcript pieces arrive word by word: they join into lines per speaker.
+    private func hear(_ id: UUID, _ speaker: LiveConnection.Speaker, _ delta: String) {
+        guard var lines = sessions[id]?.lines else { return }
+        if let last = lines.indices.last, lines[last].speaker == speaker {
+            lines[last].text += delta
+        } else {
+            let text = delta.trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty else { return }
+            lines.append(.init(speaker: speaker, text: text))
+        }
+        sessions[id]?.lines = lines
     }
 
     private func loadMessage(_ id: UUID) async {
@@ -239,7 +345,7 @@ final class CallCenter: NSObject {
         switch session.phase {
         case .ringing:
             finish(id, relayStatus: .declined)
-        case .connecting, .playing:
+        case .connecting, .playing, .live:
             // Answered but not heard to the end, so the status stays answered.
             finish(id, relayStatus: nil, note: "Ended")
         case .waiting(let note):
@@ -280,10 +386,19 @@ final class CallCenter: NSObject {
         if case .ended = session.phase { return }
         if pending?.id == id { pending = nil }
         player.stop()
+        if liveCall?.id == id {
+            liveCall?.connection.close()
+            liveCall = nil
+        }
+        // The server tracks an answered live call itself: the phone only says it hung up.
+        let liveAnswered = session.live && session.phase != .ringing
+        let relayID = session.serverID ?? (session.outgoing ? nil : session.relayID)
         sessions[id]?.phase = .ended(note ?? relayStatus?.label ?? "Ended")
         if !useCallKit { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
         Task { [weak self] in
-            if let relayStatus, let api = self?.api() {
+            if liveAnswered {
+                if let relayID, let api = self?.api() { try? await api.endLive(callID: relayID) }
+            } else if let relayStatus, let api = self?.api() {
                 try? await api.setStatus(callID: id, relayStatus)
             }
             self?.onCallFinished()
@@ -315,6 +430,7 @@ extension CallCenter: PKPushRegistryDelegate {
         let id = (data["call_id"] as? String).flatMap(UUID.init(uuidString:))
         let botName = data["bot_name"] as? String ?? "Herb"
         let title = data["title"] as? String
+        let live = data["live"] as? Bool ?? false
         MainActor.assumeIsolated {
             // iOS requires a reported call for every VoIP push, or it terminates the app.
             guard let id else {
@@ -326,7 +442,7 @@ extension CallCenter: PKPushRegistryDelegate {
                 }
                 return
             }
-            report(id: id, botName: botName, title: title, completion: completion)
+            report(id: id, botName: botName, title: title, live: live, completion: completion)
         }
     }
 }
@@ -347,6 +463,27 @@ extension CallCenter: CXProviderDelegate {
         action.fulfill()
     }
 
+    nonisolated func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
+        let id = action.callUUID
+        MainActor.assumeIsolated {
+            let update = CXCallUpdate()
+            update.remoteHandle = action.handle
+            update.localizedCallerName = sessions[id]?.botName
+            update.hasVideo = false
+            provider.reportCall(with: id, updated: update)
+            provider.reportOutgoingCall(with: id, startedConnectingAt: nil)
+            beginAnswer(id)
+        }
+        action.fulfill()
+    }
+
+    nonisolated func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
+        let id = action.callUUID
+        let muted = action.isMuted
+        MainActor.assumeIsolated { applyMute(id, muted) }
+        action.fulfill()
+    }
+
     nonisolated func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
         let id = action.callUUID
         MainActor.assumeIsolated { handleEnd(id) }
@@ -354,10 +491,16 @@ extension CallCenter: CXProviderDelegate {
     }
 
     nonisolated func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
-        MainActor.assumeIsolated { sessionDidActivate() }
+        MainActor.assumeIsolated {
+            LiveConnection.audioDidActivate(audioSession)
+            sessionDidActivate()
+        }
     }
 
     nonisolated func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
-        MainActor.assumeIsolated { audioActive = false }
+        MainActor.assumeIsolated {
+            LiveConnection.audioDidDeactivate(audioSession)
+            audioActive = false
+        }
     }
 }

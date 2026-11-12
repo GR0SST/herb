@@ -42,6 +42,11 @@ struct SettingsView: View {
                         .foregroundStyle(.primary)
                     }
                 }
+                if let live = model.status?.live, live.available, live.billing {
+                    Section {
+                        LabeledContent("Live Minutes Left", value: "\((live.secondsLeft ?? 0) / 60)")
+                    }
+                }
                 Section {
                     Toggle("Auto Hang Up", isOn: $autoHangUp)
                 } footer: {

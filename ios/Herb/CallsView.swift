@@ -92,7 +92,9 @@ struct ActiveCallView: View {
             if let title = session.title {
                 Text(title).font(.headline).multilineTextAlignment(.center)
             }
-            if let text = session.text {
+            if session.live {
+                LiveTranscript(lines: session.lines)
+            } else if let text = session.text {
                 ScrollView {
                     Text(text.withoutStressMarks)
                         .font(.body)
@@ -113,6 +115,7 @@ struct ActiveCallView: View {
         case .ringing: "Calling…"
         case .connecting: "Connecting…"
         case .playing: "Speaking"
+        case .live: "Live"
         case .waiting(let note): note
         case .ended(let note): note
         }
@@ -130,12 +133,57 @@ struct ActiveCallView: View {
                     model.callCenter.answer(session.id)
                 }
             }
-        case .connecting, .playing, .waiting:
+        case .connecting, .live:
+            if session.live {
+                HStack(spacing: 64) {
+                    CallButton(
+                        title: session.muted ? "Unmute" : "Mute",
+                        systemImage: session.muted ? "mic.slash.fill" : "mic.fill",
+                        color: session.muted ? .orange : .gray
+                    ) {
+                        model.callCenter.setMuted(session.id, !session.muted)
+                    }
+                    CallButton(title: "End", systemImage: "phone.down.fill", color: .red) {
+                        model.callCenter.end(session.id)
+                    }
+                }
+            } else {
+                CallButton(title: "End", systemImage: "phone.down.fill", color: .red) {
+                    model.callCenter.end(session.id)
+                }
+            }
+        case .playing, .waiting:
             CallButton(title: "End", systemImage: "phone.down.fill", color: .red) {
                 model.callCenter.end(session.id)
             }
         case .ended:
             EmptyView()
+        }
+    }
+}
+
+/// What was said in a live call, newest at the bottom.
+private struct LiveTranscript: View {
+    let lines: [CallSession.Line]
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(lines) { line in
+                        Text(line.text.withoutStressMarks)
+                            .font(.body)
+                            .foregroundStyle(line.speaker == .user ? .secondary : .primary)
+                            .frame(maxWidth: .infinity, alignment: line.speaker == .user ? .trailing : .leading)
+                            .multilineTextAlignment(line.speaker == .user ? .trailing : .leading)
+                            .id(line.id)
+                    }
+                }
+            }
+            .frame(maxHeight: 280)
+            .onChange(of: lines.last?.text) {
+                if let last = lines.last { proxy.scrollTo(last.id, anchor: .bottom) }
+            }
         }
     }
 }

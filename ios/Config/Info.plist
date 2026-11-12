@@ -15,7 +15,7 @@
 		<true/>
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>iOS requires this to play calls through the earpiece. Herb never records you.</string>
+	<string>Herb uses the microphone only while you talk with an agent in a live call. Nothing is recorded on the phone.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Herb connects to your own server on the local network.</string>
 </dict>
