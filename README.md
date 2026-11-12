@@ -13,7 +13,7 @@
 
 ## Status
 
-Calls are **one-way for now**: your agent speaks and you listen. You cannot talk back yet. **Full duplex calls are planned for the future.**
+Calls are **one-way for now**: your agent speaks and you listen. You cannot talk back yet. **Full duplex calls are planned:** see the [draft protocol](docs/live-calls.md).
 
 The iPhone app is on the [App Store](https://apps.apple.com/app/herb-agent-calls/id6831210101). You can also [build it from source](#build-the-app).
 
