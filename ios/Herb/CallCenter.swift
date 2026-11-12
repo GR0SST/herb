@@ -116,6 +116,15 @@ final class CallCenter: NSObject {
             scheduleTimeout(id)
             prepareMessage(id)
             completion()
+            #if DEBUG
+            // App Store screenshots of a call in progress: -HerbDemoAnswer YES
+            if UserDefaults.standard.bool(forKey: "HerbDemoAnswer") {
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(2))
+                    self?.answer(id)
+                }
+            }
+            #endif
             return
         }
         let update = CXCallUpdate()

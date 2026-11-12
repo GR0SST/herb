@@ -19,6 +19,7 @@ struct AgentAvatar: View {
         (["claude", "anthropic"], Brand(asset: "claude", tinted: false)),
         (["codex"], Brand(asset: "codex", tinted: false, fills: true)),
         (["chatgpt", "openai", "gpt"], Brand(asset: "openai", tinted: true)),
+        (["grok bot", "grokbot"], Brand(asset: "grokbot", tinted: true)),
         (["grok", "xai"], Brand(asset: "grok", tinted: true)),
         (["gemini"], Brand(asset: "gemini", tinted: false)),
         (["openbot"], Brand(asset: "openbot", tinted: false, fills: true)),

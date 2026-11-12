@@ -44,11 +44,6 @@ struct SettingsView: View {
                         .foregroundStyle(.primary)
                     }
                 }
-                if let live = model.status?.live, live.available, live.billing {
-                    Section {
-                        LabeledContent("Live Minutes Left", value: "\((live.secondsLeft ?? 0) / 60)")
-                    }
-                }
                 if let live = model.status?.live, live.available {
                     LiveCallsSection(live: live)
                 }

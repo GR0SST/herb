@@ -46,6 +46,9 @@ final class AppModel {
             Task { await self?.refresh() }
         }
         callCenter.start()
+        #if DEBUG
+        signInForScreenshots()
+        #endif
         purchases.api = { [weak self] in self?.api }
         purchases.onChange = { [weak self] in
             Task { await self?.refresh() }
@@ -54,6 +57,18 @@ final class AppModel {
     }
 
     private var deviceName: String { UIDevice.current.model }
+
+    #if DEBUG
+    /// App Store screenshots: launch with -HerbDemoServer <url> -HerbDemoKey <key> to sign in without typing.
+    private func signInForScreenshots() {
+        let defaults = UserDefaults.standard
+        guard connection == nil, let server = defaults.string(forKey: "HerbDemoServer"), let key = defaults.string(forKey: "HerbDemoKey"),
+              let url = URL(string: server)
+        else { return }
+        signInServer = url
+        Task { try? await signIn(key: key) }
+    }
+    #endif
 
     func createAccount() async throws {
         let created = try await API.createAccount(at: signInServer, deviceName: deviceName)

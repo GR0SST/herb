@@ -4,6 +4,8 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
+    // Debug builds can open on a tab for App Store screenshots: -HerbDemoTab 1
+    @State private var tab = UserDefaults.standard.integer(forKey: "HerbDemoTab")
 
     var body: some View {
         Group {
@@ -33,13 +35,16 @@ struct RootView: View {
     }
 
     private var signedIn: some View {
-        TabView {
+        TabView(selection: $tab) {
             AgentsView()
                 .tabItem { Label("Agents", systemImage: "bubble.left.and.bubble.right") }
+                .tag(0)
             CallsView(bot: nil)
                 .tabItem { Label("Calls", systemImage: "phone") }
+                .tag(1)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(2)
         }
     }
 

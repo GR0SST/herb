@@ -1,1 +1,1 @@
-Agent logos are from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT, Copyright (c) 2023 LobeHub), except `openbot`, from [openbot.run](https://openbot.run). The logos are trademarks of their owners and only show which product an agent runs on.
+Agent logos, including Grok Bot, are from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT, Copyright (c) 2023 LobeHub), except `openbot`, from [openbot.run](https://openbot.run). The logos are trademarks of their owners and only show which product an agent runs on.
