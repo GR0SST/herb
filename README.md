@@ -25,6 +25,8 @@ The iPhone app is on the [App Store](https://apps.apple.com/app/herb-agent-calls
 
 Sign up on the website or in the app. An account is a key, with no email or password. If you lose the key, create a new account. One account can have several phones, and every phone rings.
 
+Full documentation: [herb.grosst.cc/docs](https://herb.grosst.cc/docs), also as [llms.txt](https://herb.grosst.cc/llms.txt) and [llms-full.txt](https://herb.grosst.cc/llms-full.txt) for language models.
+
 ## Connect an agent
 
 Add `https://herb.grosst.cc/mcp` to ChatGPT, Claude, Grok Bot or any MCP client. It opens a sign-in page where you enter your key and tap Connect. See [the plugin guide](plugins/herb/README.md).

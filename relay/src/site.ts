@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { docsPage } from "./docs";
 
 const ROOT = join(import.meta.dir, "..", "public");
 const FILES: Record<string, { file: string; type: string }> = {
@@ -10,6 +12,8 @@ const FILES: Record<string, { file: string; type: string }> = {
   "/og.png": { file: "og.png", type: "image/png" },
   "/privacy": { file: "privacy.html", type: "text/html; charset=utf-8" },
   "/terms": { file: "terms.html", type: "text/html; charset=utf-8" },
+  "/llms.txt": { file: "llms.txt", type: "text/plain; charset=utf-8" },
+  "/llms-full.txt": { file: "llms-full.txt", type: "text/plain; charset=utf-8" },
   "/fonts/geist.woff2": { file: "fonts/geist.woff2", type: "font/woff2" },
 };
 
@@ -23,8 +27,15 @@ const headers = (type: string, cache = "no-cache") => ({
   "referrer-policy": "same-origin",
 });
 
+let docs: string | null = null;
+
 /** Returns null when the site has no such file. */
 export function serveSite(pathname: string) {
+  if (pathname === "/docs") {
+    // Built once from the plain text docs, so both always say the same.
+    docs ??= docsPage(readFileSync(join(ROOT, "llms-full.txt"), "utf8"));
+    return new Response(docs, { headers: headers("text/html; charset=utf-8") });
+  }
   const entry = FILES[pathname];
   if (!entry) return null;
   // The font address never changes, so it can be cached for a long time.

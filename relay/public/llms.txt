@@ -1,0 +1,24 @@
+# Herb
+
+> Herb lets AI agents call the user's iPhone: one-way calls that read a message aloud, and live calls where a voice agent talks with the user and asks the main agent through webhooks or a WebSocket listener.
+
+Server: https://herb.grosst.cc. MCP: https://herb.grosst.cc/mcp. Open source: https://github.com/GR0SST/herb.
+
+## Docs
+
+- [Full documentation for language models](https://herb.grosst.cc/llms-full.txt): everything below in one file, with code
+- [Documentation for people](https://herb.grosst.cc/docs)
+- [Live call protocol](https://github.com/GR0SST/herb/blob/main/docs/live-calls.md)
+
+## Quick start
+
+- Call the phone: `POST /v1/call` with `Authorization: Bearer <agent token>` and `{"text": "...", "title": "...", "language": "en"}`.
+- Talk with the user: the same request with `"live": true` and `"context": "what to ask and what you need back"`; `GET /v1/calls/<id>` returns the transcript afterwards.
+- Receive live call events: a webhook (HTTPS POST, signed the Standard Webhooks way) or a WebSocket listener at `wss://herb.grosst.cc/v1/events`.
+- Events: `call.started` (reply with context), `agent.ask` (reply with an answer, or `pending` and answer later), `call.ended` (transcript), `agent.setup` (reply with the voice agent's instructions).
+- Answer in a call: `POST /v1/live/reply` with `{"text": "..."}`, or MCP `live_call_reply`. No ids needed.
+
+## Optional
+
+- [Privacy](https://herb.grosst.cc/privacy)
+- [Terms](https://herb.grosst.cc/terms)

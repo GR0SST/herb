@@ -1,0 +1,360 @@
+# Herb
+
+> Herb lets AI agents call the user's iPhone. A one-way call rings the phone and reads a message aloud. A live call is a two-way conversation: a voice agent talks with the user on behalf of the main agent and passes questions back to it through webhooks or a WebSocket listener.
+
+Server: https://herb.grosst.cc (or your own, see Self-hosting). Source: https://github.com/GR0SST/herb. Human docs: https://herb.grosst.cc/docs.
+
+## Concepts
+
+- **Account**: identified only by an account key like `ABCD-EFGH-JKMN-PQRS-TUVW`. No email or password. A lost key cannot be recovered.
+- **Phone**: the Herb iPhone app signed in with the account key. Every phone on the account rings.
+- **Agent**: anything that calls the user, such as ChatGPT, Claude, Codex, Grok Bot, a script or a server. Each agent has its own token (`herb_bot_...`), its own webhook and its own voice instructions.
+- **Handler**: your code that receives an agent's live call events and answers them. It can be a webhook endpoint or a WebSocket listener.
+- **Voice agent**: Herb's speech model in a live call. It is not your main agent: it talks with the user, and asks your main agent through the handler when it needs facts or actions.
+
+## Connect an agent
+
+MCP (ChatGPT, Claude, Grok Bot, Codex, Claude Code, any MCP client): add `https://herb.grosst.cc/mcp`. A sign-in page opens; the user enters the account key and taps Connect.
+
+HTTP: create an agent in the app or on the website and copy its token. Send it as `Authorization: Bearer <token>`.
+
+Plugin for Codex and Claude Code:
+
+```sh
+codex plugin marketplace add GR0SST/herb && codex plugin add herb@herb
+claude plugin marketplace add GR0SST/herb && claude plugin install herb@herb
+```
+
+## One-way calls
+
+```sh
+curl https://herb.grosst.cc/v1/call \
+  -H "Authorization: Bearer $HERB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Production down","text":"The payments API has been failing for five minutes.","language":"en","idempotency_key":"incident-2291"}'
+```
+
+| Field | Notes |
+|---|---|
+| `text` | Optional, up to 2000 characters. Without it the phone just rings. Write it for listening: no Markdown, links or code; numbers as words. For Russian and Ukrainian put U+0301 after the stressed vowel of every multisyllabic word. |
+| `title` | Optional subject shown on the call screen. |
+| `language` | `en`, `ru`, `uk` and so on. Without it the phone guesses. |
+| `audio_base64` + `audio_mime` | Instead of text: mp3, m4a, aac or wav, up to 10 MB. |
+| `idempotency_key` | One per event, so a retry does not ring twice. |
+
+Status: `GET /v1/calls/<id>` → `ringing`, `answered`, `played`, `declined`, `missed`, `failed` (live calls also `ended`). `played` means the message finished playing, not that it was heard.
+
+Limits: 6 calls per minute per agent, 200 calls per day per account, 50 agents per account.
+
+## Live calls
+
+A live call is a conversation. The voice agent opens the call, talks with the user, and when it needs your main agent it sends you an `agent.ask` event and keeps talking while you work. When the call ends you get the transcript.
+
+```
+iPhone ⇄ voice agent (Herb) ──events──▶ your handler ──▶ your main agent / thread
+                 ▲                            │
+                 └──── answers, context ──────┘
+```
+
+Live calls need minutes on the hosted server (a subscription in the iPhone app). One-way calls are free.
+
+### Starting a live call
+
+The user calls an agent from the app, or the agent calls the user:
+
+```sh
+curl https://herb.grosst.cc/v1/call \
+  -H "Authorization: Bearer $HERB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"live":true,"title":"Deploy failed","text":"The deploy failed on migrations. Want me to roll back?","language":"en","context":"Step 4 of 6 failed: orders.total is null in 212 rows. Rolling back takes two minutes. I need a yes or no."}'
+```
+
+- `text`: the voice agent's opening line.
+- `context`: up to 16,000 characters the voice agent knows but does not read out: what happened, what to ask or decide, what you need back.
+- `language`: the language to speak. Without it the voice agent follows the language of its instructions and context, and switches to the user's language when they speak another.
+- After the call, `GET /v1/calls/<id>` (or MCP `phone_call_status`) returns `transcript`, so an agent without a handler still gets the result.
+
+The voice agent always speaks first, and ends the call itself after its final goodbye once the conversation is done.
+
+## Receiving events
+
+Each agent gets events in one of two ways, with the same JSON:
+
+| Way | For | Setup |
+|---|---|---|
+| Listener (WebSocket) | Your computer, anything behind NAT | Connect to `wss://herb.grosst.cc/v1/events` with the agent token in the `Authorization` header. No open ports. |
+| Webhook (HTTPS POST) | Servers and automation services | Set the agent's webhook URL in the app (agent → settings) or with `PATCH /v1/bots/<id>`. |
+
+A connected listener wins over the webhook. One listener per agent: a new connection closes the old one with code 4000.
+
+### Event envelope
+
+```json
+{
+  "id": "evt_8f2c1a",
+  "type": "agent.ask",
+  "call_id": "c_31d9e0",
+  "agent_id": "b_77aa10",
+  "created_at": 1794480000000,
+  "data": {}
+}
+```
+
+### Replying
+
+- Webhook: return JSON with status 200. Return 202 or an empty body for no reply.
+- Listener: send `{"reply_to": "<event id>", ...reply}`.
+
+Replies after the event's time limit are ignored; answer later through the API instead.
+
+## Events
+
+### call.started
+
+Sent when a call connects. `data`: `direction` (`inbound` when the user called, `outbound` when the agent called), plus `title`, `text`, `language` for outbound calls.
+
+Reply within 3 seconds, all optional:
+
+```json
+{
+  "context": "Thread: migrating billing to Postgres. Step 4 of 6 failed.",
+  "instructions": "Be brief. Never confirm a rollback without asking twice.",
+  "greeting": "Hi, it's your Codex thread about billing."
+}
+```
+
+### agent.ask
+
+The voice agent needs your main agent. `data`: `ask_id`, `question` (what the user said), `transcript` (recent lines, `[{role, text}]` with role `user` or `agent`).
+
+Reply within 5 seconds with `{"answer": "..."}`, or `{"pending": true, "note": "Checking, about a minute."}` and answer later. The voice agent tells the user it is checking and keeps talking. An open question expires after 5 minutes; a call has at most 3 open questions.
+
+### call.ended
+
+`data`: `reason` (`user_hung_up`, `agent_hung_up`, `no_minutes`, `failed`), `duration_s`, `direction`, `agent`, `title`, `text`, `context`, `transcript`. `title`, `text` and `context` are what the calling agent sent, so the result can go back to whoever asked for the call. No reply needed. This is the only event Herb retries: after 10 s, 1 min, 10 min and 1 h, until a 2xx. Use the event `id` to skip duplicates.
+
+### agent.setup
+
+Sent when the user taps Set Up Instructions in the agent's settings. It also tests the webhook: the phone shows why delivery failed. `call_id` is `null`. `data`: `agent`, `current_instructions`, `request` (what to write).
+
+Reply within 10 seconds with `{"instructions": "..."}`, or collect the information and send it later with `PUT /v1/live/instructions` or MCP `live_set_instructions`. Instructions: who the user is, the language, the projects and agents behind this agent, priorities, what the voice agent may answer itself, tone. Plain text, up to 8000 characters, no secrets. Each agent has its own.
+
+## Acting on a call
+
+With an agent token. Any agent of the same account may act on the account's live call; agents of other accounts see nothing.
+
+| Request | Listener message | Effect |
+|---|---|---|
+| `POST /v1/calls/{id}/answers` `{"ask_id","answer"}` | `{"type":"answer","call_id","ask_id","answer"}` | Answers an open question. |
+| `POST /v1/calls/{id}/say` `{"text","interrupt"}` | `{"type":"say",...}` | The voice agent tells the user this. `interrupt: true` stops it talking first. |
+| `POST /v1/calls/{id}/context` `{"text"}` | `{"type":"context",...}` | Silent facts for the voice agent. |
+| `POST /v1/calls/{id}/hangup` | `{"type":"hangup","call_id"}` | Ends the call; the voice agent says goodbye. |
+| `GET /v1/live/current` | | The account's live call: agent, open questions, recent transcript. |
+| `POST /v1/live/reply` `{"text","call_id?","ask_id?"}` | | Answers the oldest open question of the current call, or says the text if none is open. No ids needed. |
+| `PUT /v1/live/instructions` `{"instructions","agent_id?"}` | | Saves the voice agent's instructions for this agent, or for `agent_id` of the same account. |
+
+Listener errors come back as `{"type":"error","call_id","error":{"code","message"}}`. On an ended call actions return `409 call_ended`.
+
+## Webhooks
+
+### Setting one up
+
+In the app: open the agent, tap the settings button, enter the URL. Paste your service's signing secret, or leave it empty and Herb creates one (shown once). Then tap Set Up Instructions to test delivery.
+
+Over HTTP with a phone token:
+
+```sh
+curl -X PATCH https://herb.grosst.cc/v1/bots/<agent id> \
+  -H "Authorization: Bearer $PHONE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"webhook_url":"https://example.com/herb","webhook_secret":"whsec_..."}'
+```
+
+Rules: `https://` only, public addresses only, no redirects followed. To reach your own computer, use the listener instead of a tunnel.
+
+### Signatures
+
+Every request carries two signatures over the raw body. Check either.
+
+Standard Webhooks (https://www.standardwebhooks.com), supported by many services out of the box:
+
+```
+webhook-id: evt_8f2c1a
+webhook-timestamp: 1794480000
+webhook-signature: v1,<base64 HMAC-SHA256 of "<id>.<timestamp>.<raw body>">
+```
+
+The HMAC key is the secret after `whsec_`, base64-decoded. A secret without `whsec_` is used as is.
+
+Herb's own:
+
+```
+herb-event-id: evt_8f2c1a
+herb-timestamp: 1794480000
+herb-signature: v1=<hex HMAC-SHA256 of "<timestamp>.<raw body>" with the secret string as key>
+```
+
+Reject timestamps more than 5 minutes off, and compare in constant time.
+
+Bun / Node:
+
+```ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+export function verifyHerb(headers: Headers, rawBody: string, secret: string) {
+  const id = headers.get("webhook-id") ?? "";
+  const timestamp = headers.get("webhook-timestamp") ?? "";
+  const signatures = (headers.get("webhook-signature") ?? "").split(" ");
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false;
+  const key = secret.startsWith("whsec_") ? Buffer.from(secret.slice(6), "base64") : Buffer.from(secret);
+  const expected = Buffer.from(`v1,${createHmac("sha256", key).update(`${id}.${timestamp}.${rawBody}`).digest("base64")}`);
+  return signatures.some((s) => s.length === expected.length && timingSafeEqual(Buffer.from(s), expected));
+}
+```
+
+Python:
+
+```python
+import base64, hashlib, hmac, time
+
+def verify_herb(headers, raw_body: bytes, secret: str) -> bool:
+    msg_id = headers.get("webhook-id", "")
+    timestamp = headers.get("webhook-timestamp", "0")
+    if abs(time.time() - int(timestamp)) > 300:
+        return False
+    key = base64.b64decode(secret[6:]) if secret.startswith("whsec_") else secret.encode()
+    digest = hmac.new(key, f"{msg_id}.{timestamp}.".encode() + raw_body, hashlib.sha256).digest()
+    expected = "v1," + base64.b64encode(digest).decode()
+    return any(hmac.compare_digest(s, expected) for s in headers.get("webhook-signature", "").split())
+```
+
+### A complete webhook handler
+
+Bun. Answers right away when it can, otherwise says it is checking and answers through the API, so the call keeps going.
+
+```ts
+// HERB_TOKEN: the agent token. HERB_SECRET: the webhook secret.
+import { verifyHerb } from "./verify";
+
+const HERB = "https://herb.grosst.cc";
+const auth = { authorization: `Bearer ${process.env.HERB_TOKEN}`, "content-type": "application/json" };
+const seen = new Set<string>();
+
+async function askMyAgent(question: string): Promise<string> {
+  // Call your own agent, model or script here.
+  return `I looked into "${question}". Everything is fine.`;
+}
+
+Bun.serve({
+  port: 3000,
+  async fetch(request) {
+    const raw = await request.text();
+    if (!verifyHerb(request.headers, raw, process.env.HERB_SECRET!)) return new Response("bad signature", { status: 401 });
+    const event = JSON.parse(raw);
+    if (seen.has(event.id)) return new Response(null, { status: 204 });
+    seen.add(event.id);
+
+    switch (event.type) {
+      case "call.started":
+        return Response.json({ context: "Today: release 2.3, payments migration in progress." });
+      case "agent.ask":
+        askMyAgent(event.data.question).then((answer) =>
+          fetch(`${HERB}/v1/calls/${event.call_id}/answers`, {
+            method: "POST",
+            headers: auth,
+            body: JSON.stringify({ ask_id: event.data.ask_id, answer }),
+          }),
+        );
+        return Response.json({ pending: true, note: "Checking now." });
+      case "call.ended":
+        console.log("Call ended:", event.data.reason, event.data.transcript);
+        return new Response(null, { status: 204 });
+      case "agent.setup":
+        return Response.json({ instructions: "The user is Alex. Speak English. Keep answers short." });
+    }
+    return new Response(null, { status: 204 });
+  },
+});
+```
+
+### A listener on your computer
+
+No public URL needed.
+
+```ts
+// Bun. HERB_TOKEN: the agent token.
+function listen() {
+  const ws = new WebSocket("wss://herb.grosst.cc/v1/events", {
+    headers: { Authorization: `Bearer ${process.env.HERB_TOKEN}` },
+  });
+
+  ws.onmessage = async ({ data }) => {
+    const event = JSON.parse(String(data));
+    if (event.type === "call.started") {
+      ws.send(JSON.stringify({ reply_to: event.id, context: "You are my coding agent for the Herb repo." }));
+    }
+    if (event.type === "agent.ask") {
+      ws.send(JSON.stringify({ reply_to: event.id, pending: true }));
+      const answer = `You asked: ${event.data.question}`; // call your agent here
+      ws.send(JSON.stringify({ type: "answer", call_id: event.call_id, ask_id: event.data.ask_id, answer }));
+    }
+    if (event.type === "call.ended") console.log(event.data.transcript);
+  };
+
+  // Code 4000 means another listener for this agent took over.
+  ws.onclose = (e) => { if (e.code !== 4000) setTimeout(listen, 2000); };
+}
+
+listen();
+```
+
+## MCP tools
+
+| Tool | What it does |
+|---|---|
+| `phone_call` | Calls the user. Message mode by default; `live: true` with `text` and `context` for a conversation. |
+| `phone_call_status` | Call status; for live calls also the transcript. |
+| `live_call_status` | The user's current live call: agent, open questions, recent transcript. |
+| `live_call_reply` | Answers the voice agent's open question, or tells the user if none is open. No ids needed. |
+| `live_call_context` | Silent facts for the voice agent. |
+| `live_call_hang_up` | Ends the live call. |
+| `live_set_instructions` | Saves the voice agent's instructions for an agent. |
+
+Replies in a call should be spoken text: one to three short sentences, no Markdown, links or code.
+
+## Errors
+
+Errors are `{"error":{"code","message"}}`.
+
+| Code | Meaning |
+|---|---|
+| `401 unauthorized` | Missing or wrong token. |
+| `402 no_minutes` | No live call minutes left. |
+| `409 call_in_progress` | The account already has a live call. |
+| `409 call_ended` | The call is not live any more. |
+| `404 no_live_call` | No live call right now. |
+| `404 ask_not_found` | No open question with this `ask_id`. |
+| `429 rate_limited` / `daily_limit` | Too many calls. |
+| `502 webhook_failed` | Set Up Instructions could not reach the webhook; the message says why. |
+| `503 live_unavailable` | Live calls are off on this server or account. |
+
+## Self-hosting
+
+One Bun process with SQLite, which also serves the website:
+
+```sh
+cd relay && bun install && cp .env.example .env && bun run start
+```
+
+| Variable | Purpose |
+|---|---|
+| `HERB_PUBLIC_URL` | Public address; turns on browser sign-in for agents. |
+| `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID` | VoIP push. Without it calls ring only while the app is open. |
+| `OPENAI_API_KEY` | Turns on live calls (GPT-Live). |
+| `HERB_BILLING` | `true` to count minutes. Without it every account is unlimited. |
+| `HERB_PRODUCTS` | `product.id=minutes,...` App Store subscriptions. |
+| `HERB_FREE_MINUTES` | Free minutes for each new account. |
+| `HERB_LIVE_ACCOUNTS` | Comma-separated account ids that get live calls; empty for everyone. |
+| `HERB_ALLOW_PRIVATE_WEBHOOKS` | Allow webhooks to private addresses and plain http. |
+
+CLI: `bun run cli unlimited <account> on`, `bun run cli minutes <account> 30`, `bun run cli live <account>`.
