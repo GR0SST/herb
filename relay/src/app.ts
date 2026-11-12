@@ -661,6 +661,17 @@ export function createApp(options: AppOptions) {
     const oauthResponse = await oauth?.handle(request, url);
     if (oauthResponse) return oauthResponse;
 
+    // A demo handler for live calls, so a new account or App Review can try a call without their own agent.
+    // It replies to every event with the same fixed text, so there is nothing to protect.
+    if (url.pathname === "/demo/agent" && request.method === "POST") {
+      return Response.json({
+        context: "This is a demo of Herb live calls. You speak for a demo agent called Production Monitor. Pretend it watches a web shop: checkout errors rose to 4% for ten minutes after the 14:05 deploy, then went back to normal after an automatic restart. Nothing is broken now.",
+        instructions: "Be friendly and brief. Explain that in real use you would pass questions to the person's own AI agent. Offer to end the call when they are done.",
+        greeting: "Hi, this is the Production Monitor demo. Want to hear what happened after today's deploy?",
+        answer: "The demo agent says: checkout errors went up to 4 percent after the 14:05 deploy and recovered after an automatic restart. No action is needed.",
+      });
+    }
+
     // App Store Server Notifications: Apple's signature is the authentication.
     if (url.pathname === "/v1/billing/apple" && request.method === "POST") {
       const body = await readJson<{ signedPayload?: unknown }>(request);
