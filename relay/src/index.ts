@@ -41,6 +41,7 @@ const app = createApp({
     debug: process.env.HERB_LIVE_DEBUG === "true",
   }) : null,
   billing: process.env.HERB_BILLING === "true",
+  liveAccounts: process.env.HERB_LIVE_ACCOUNTS?.split(",").map((id) => id.trim()).filter(Boolean),
   allowPrivateWebhooks: process.env.HERB_ALLOW_PRIVATE_WEBHOOKS === "true",
 });
 setInterval(() => app.purge(), 6 * 60 * 60 * 1000);

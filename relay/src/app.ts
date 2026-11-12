@@ -43,6 +43,8 @@ export interface AppOptions {
   fetchImpl?: typeof fetch;
   /** Speech model for live calls. Without it live calls are off. */
   voice?: VoiceEngine | null;
+  /** Only these accounts get live calls, for trying them out on a shared server. Empty or missing: everyone. */
+  liveAccounts?: string[];
   /** Charge live calls against bought minutes. */
   billing?: boolean;
   /** Let webhooks reach private addresses. Only for self-hosted servers. */
@@ -151,6 +153,8 @@ export function createApp(options: AppOptions) {
   const accounts = createAccounts(store, { open: options.openRegistration ?? true, now });
   oauth?.useAccounts(accounts);
   const voice = options.voice ?? null;
+  const liveAccounts = options.liveAccounts?.length ? new Set(options.liveAccounts) : null;
+  const liveFor = (accountId: string) => Boolean(voice) && (!liveAccounts || liveAccounts.has(accountId));
   const allowPrivateWebhooks = options.allowPrivateWebhooks ?? false;
   const live = createLive({
     store,
@@ -190,7 +194,7 @@ export function createApp(options: AppOptions) {
     const reject = (code: string, message: string, status = 400) => ({ status, body: { error: { code, message } } });
     const isLive = args.live === true;
     if (isLive) {
-      if (!voice) return reject("live_unavailable", "Live calls are not available on this server", 503);
+      if (!liveFor(bot.account_id)) return reject("live_unavailable", "Live calls are not available on this server", 503);
       if (audioB64) return reject("invalid_content", "A live call takes text, not audio");
       const blocked = live.canStart(bot.account_id);
       if (blocked === "no_minutes") return reject("no_minutes", "No live call minutes left", 402);
@@ -307,7 +311,7 @@ export function createApp(options: AppOptions) {
   }
 
   function liveBlocked(accountId: string) {
-    if (!voice) return err(503, "live_unavailable", "Live calls are not available on this server");
+    if (!liveFor(accountId)) return err(503, "live_unavailable", "Live calls are not available on this server");
     const blocked = live.canStart(accountId);
     if (blocked === "no_minutes") return err(402, "no_minutes", "No live call minutes left");
     if (blocked === "call_in_progress") return err(409, "call_in_progress", "Another live call is in progress");
@@ -446,7 +450,7 @@ export function createApp(options: AppOptions) {
         phones: phones.length,
         mcp_url: options.publicUrl ? `${options.publicUrl}/mcp` : null,
         live: {
-          available: Boolean(voice),
+          available: liveFor(accountId),
           billing: options.billing ?? false,
           seconds_left: options.billing ? store.liveSeconds(accountId) : null,
         },

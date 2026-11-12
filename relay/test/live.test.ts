@@ -248,6 +248,14 @@ describe("starting live calls", () => {
     expect(hits[0]!.event.data).toMatchObject({ direction: "outbound", title: "Deploy", text: "Deploy failed. Roll back?" });
   });
 
+  test("only listed accounts get live calls", async () => {
+    app = createApp({ store, dataDir: mkdtempSync(join(tmpdir(), "herb-live-")), push, now: () => clock, voice: fakeVoice, liveAccounts: ["someone-else"] });
+    expect((await callAgent()).status).toBe(503);
+    expect((await req("/v1/call", botToken, { body: { live: true, text: "x" } })).status).toBe(503);
+    const status = (await (await req("/v1/status", devToken)).json()) as { live: { available: boolean } };
+    expect(status.live.available).toBe(false);
+  });
+
   test("a one-way call cannot go live", async () => {
     const placed = (await (await req("/v1/call", botToken, { body: { text: "hi" } })).json()) as { id: string };
     expect((await req(`/v1/calls/${placed.id}/live`, devToken, { body: {} })).status).toBe(409);
