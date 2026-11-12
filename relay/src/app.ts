@@ -267,12 +267,38 @@ export function createApp(options: AppOptions) {
     return live.act(bot, callId, action, args);
   }
 
+  /** An agent saves the voice agent's instructions: its own, or another agent's of the same account. */
+  function setInstructionsForBot(bot: Bot, args: Record<string, unknown>) {
+    const fail = (status: number, code: string, message: string) => ({ status, body: { error: { code, message } } });
+    const target = typeof args.agent_id === "string" && args.agent_id ? store.bot(args.agent_id) : bot;
+    if (!target || target.account_id !== bot.account_id) return fail(404, "not_found", "Agent not found");
+    const instructions = typeof args.instructions === "string" ? args.instructions.trim() : "";
+    if (!instructions) return fail(400, "invalid_instructions", "Instructions are empty");
+    if (instructions.length > LIVE_LIMITS.instructions) {
+      return fail(400, "invalid_instructions", `Instructions are longer than ${LIVE_LIMITS.instructions} characters`);
+    }
+    store.setBotLive(target.id, { instructions });
+    return { status: 200, body: { ok: true, agent_id: target.id, agent: target.name } };
+  }
+
+  /** Sends agent.setup and saves instructions that come back right away. */
+  async function setupBot(bot: Bot) {
+    const result = await live.requestSetup(bot);
+    if (!result.reached) return err(502, "webhook_failed", result.error ?? "Could not reach the webhook");
+    if (result.instructions) {
+      store.setBotLive(bot.id, { instructions: result.instructions });
+      return Response.json({ status: "saved", instructions: result.instructions });
+    }
+    return Response.json({ status: "requested" });
+  }
+
   const mcpActions: McpActions = {
     placeCall,
     callStatus: callStatusForBot,
     liveStatus: liveStatusForBot,
     liveReply: (bot, args) => live.reply(bot, args),
     liveAct: liveActForBot,
+    setInstructions: setInstructionsForBot,
   };
 
   async function chat(bot: Bot, request: Request) {
@@ -527,6 +553,7 @@ export function createApp(options: AppOptions) {
       }
       if (action === "chat" && method === "POST") return chat(bot, request);
       if (!action && method === "PATCH") return updateBot(bot, request);
+      if (action === "setup" && method === "POST") return setupBot(bot);
     }
     if (resource === "live" && !id && method === "POST") {
       if (!device) return err(403, "forbidden", "Only for phones");
@@ -642,6 +669,10 @@ export function createApp(options: AppOptions) {
         }
         if (rest[0] === "live" && rest[1] === "current" && rest.length === 2 && request.method === "GET") {
           const { status, body } = liveStatusForBot(bot);
+          return Response.json(body, { status });
+        }
+        if (rest[0] === "live" && rest[1] === "instructions" && rest.length === 2 && request.method === "PUT") {
+          const { status, body } = setInstructionsForBot(bot, (await readJson<Record<string, unknown>>(request)) ?? {});
           return Response.json(body, { status });
         }
         if (rest[0] === "live" && rest[1] === "reply" && rest.length === 2 && request.method === "POST") {

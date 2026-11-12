@@ -63,17 +63,26 @@ struct AgentSettingsView: View {
     @State private var copied = false
     @State private var isSaving = false
     @State private var error: String?
+    @State private var setup = SetupState.idle
+
+    private enum SetupState: Equatable {
+        case idle, working, waiting, saved
+        case failed(String)
+    }
+
+    /// The agent as the server last reported it: `bot` is a snapshot from when the sheet opened.
+    private var current: Bot { model.bots.first { $0.id == bot.id } ?? bot }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     TextField("Be brief. Ask before deploying.", text: $instructions, axis: .vertical)
-                        .lineLimit(4...10)
+                        .lineLimit(4...12)
                 } header: {
                     Text("Instructions")
                 } footer: {
-                    Text("How the voice agent behaves in every live call with \(bot.name).")
+                    Text("What the voice agent knows at the start of every live call with \(bot.name). Each agent has its own.")
                 }
                 Section {
                     TextField("https://example.com/herb", text: $webhookURL)
@@ -103,12 +112,39 @@ struct AgentSettingsView: View {
                 } footer: {
                     if secret != nil {
                         Text("Copy the secret now. It is shown only once and signs every event.")
-                    } else if !ownSecret.isEmpty || bot.live?.webhookURL == nil {
+                    } else if !ownSecret.isEmpty || current.live?.webhookURL == nil {
                         Text("Paste the signing secret your service shows for this webhook. Leave it empty and Herb creates one.")
-                    } else if bot.live?.listener == true {
+                    } else if current.live?.listener == true {
                         Text("A listener is connected. It gets events instead of the webhook.")
                     } else {
                         Text("Where \(bot.name)'s live call events go. A connected listener gets them instead.")
+                    }
+                }
+                if !webhookURL.trimmingCharacters(in: .whitespaces).isEmpty || current.live?.listener == true {
+                    Section {
+                        Button {
+                            runSetup()
+                        } label: {
+                            HStack {
+                                Label("Set Up Instructions", systemImage: "wand.and.stars")
+                                Spacer()
+                                if setup == .working || setup == .waiting { ProgressView() }
+                            }
+                        }
+                        .disabled(setup == .working || isSaving)
+                    } footer: {
+                        switch setup {
+                        case .idle:
+                            Text("Checks the webhook and asks \(bot.name) to write these instructions for itself.")
+                        case .working:
+                            Text("Checking the webhook…")
+                        case .waiting:
+                            Text("The webhook works. \(bot.name) is collecting the instructions and will send them shortly.")
+                        case .saved:
+                            Text("\(bot.name) sent its instructions.")
+                        case .failed(let message):
+                            Text(message).foregroundStyle(.red)
+                        }
                     }
                 }
                 if let error {
@@ -128,27 +164,40 @@ struct AgentSettingsView: View {
                 }
             }
             .onAppear {
-                instructions = bot.live?.instructions ?? ""
-                webhookURL = bot.live?.webhookURL ?? ""
+                instructions = current.live?.instructions ?? ""
+                webhookURL = current.live?.webhookURL ?? ""
             }
         }
     }
 
-    private func save() {
+    private var changes: [String: String?] {
         var changes: [String: String?] = [:]
         let cleanInstructions = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanURL = webhookURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleanInstructions != (bot.live?.instructions ?? "") {
+        if cleanInstructions != (current.live?.instructions ?? "") {
             changes["instructions"] = .some(cleanInstructions.isEmpty ? nil : cleanInstructions)
         }
-        if cleanURL != (bot.live?.webhookURL ?? "") {
+        if cleanURL != (current.live?.webhookURL ?? "") {
             changes["webhook_url"] = .some(cleanURL.isEmpty ? nil : cleanURL)
         }
         let cleanSecret = ownSecret.trimmingCharacters(in: .whitespacesAndNewlines)
         if !cleanSecret.isEmpty && !cleanURL.isEmpty {
             changes["webhook_secret"] = .some(cleanSecret)
         }
-        guard !changes.isEmpty, let api = model.api else {
+        return changes
+    }
+
+    /// Saves pending changes. A new generated secret is shown for copying.
+    private func persist() async throws {
+        let pending = changes
+        guard !pending.isEmpty, let api = model.api else { return }
+        if let newSecret = try await api.updateAgent(id: bot.id, changes: pending) { secret = newSecret }
+        ownSecret = ""
+        await model.refresh()
+    }
+
+    private func save() {
+        guard !changes.isEmpty else {
             dismiss()
             return
         }
@@ -157,11 +206,44 @@ struct AgentSettingsView: View {
         Task {
             defer { isSaving = false }
             do {
-                let newSecret = try await api.updateAgent(id: bot.id, changes: changes)
-                await model.refresh()
-                if let newSecret { secret = newSecret } else { dismiss() }
+                try await persist()
+                if secret == nil { dismiss() }
             } catch {
                 self.error = error.localizedDescription
+            }
+        }
+    }
+
+    /// Saves the webhook first, then asks the agent for instructions and waits a while for them to arrive.
+    private func runSetup() {
+        setup = .working
+        error = nil
+        Task {
+            do {
+                try await persist()
+                guard let api = model.api else { return }
+                let before = current.live?.instructions
+                switch try await api.setupAgent(id: bot.id) {
+                case .saved(let text):
+                    instructions = text
+                    await model.refresh()
+                    setup = .saved
+                case .requested:
+                    setup = .waiting
+                    for _ in 0..<40 {
+                        try await Task.sleep(for: .seconds(3))
+                        await model.refresh()
+                        if let text = current.live?.instructions, text != before {
+                            instructions = text
+                            setup = .saved
+                            return
+                        }
+                    }
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                setup = .failed(error.localizedDescription)
             }
         }
     }

@@ -70,6 +70,22 @@ export const MCP_TOOLS = [
     },
   },
   {
+    name: "live_set_instructions",
+    title: "Set the voice agent's instructions",
+    annotations: { title: "Set the voice agent's instructions", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description:
+      "Save what Herb's voice agent knows at the start of every live call: who the user is, the language, the projects and agents behind you, priorities, what to answer itself and what to pass back, tone. Replaces the previous instructions. Use when Herb sends an agent.setup event or the user asks. No secrets.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        instructions: { type: "string", description: "Plain text for a speech model, up to 8000 characters." },
+        agent_id: { type: "string", description: "Optional. The agent_id from the agent.setup event. Defaults to you." },
+      },
+      required: ["instructions"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "live_call_hang_up",
     title: "End the live call",
     annotations: { title: "End the live call", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
@@ -102,6 +118,7 @@ export interface McpActions {
   liveStatus(bot: Bot): Result;
   liveReply(bot: Bot, args: Record<string, unknown>): Result;
   liveAct(bot: Bot, action: "context" | "hangup", args: Record<string, unknown>): Result;
+  setInstructions(bot: Bot, args: Record<string, unknown>): Result;
 }
 
 const LIVE_TOOLS: Record<string, (bot: Bot, args: Record<string, unknown>, actions: McpActions) => Result> = {
@@ -109,6 +126,7 @@ const LIVE_TOOLS: Record<string, (bot: Bot, args: Record<string, unknown>, actio
   live_call_reply: (bot, args, actions) => actions.liveReply(bot, args),
   live_call_context: (bot, args, actions) => actions.liveAct(bot, "context", args),
   live_call_hang_up: (bot, args, actions) => actions.liveAct(bot, "hangup", args),
+  live_set_instructions: (bot, args, actions) => actions.setInstructions(bot, args),
 };
 
 type RpcId = string | number | null;

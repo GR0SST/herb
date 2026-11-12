@@ -123,6 +123,21 @@ struct API {
         return try JSONDecoder().decode(Reply.self, from: data).webhook_secret
     }
 
+    enum SetupResult {
+        case saved(String)
+        case requested
+    }
+
+    /// Sends agent.setup to the agent's webhook. Throws the delivery problem, such as an HTTP error.
+    func setupAgent(id: String) async throws -> SetupResult {
+        struct Reply: Decodable { let status: String; let instructions: String? }
+        var req = try request("v1/bots/\(id)/setup", method: "POST")
+        req.timeoutInterval = 30
+        let reply = try JSONDecoder().decode(Reply.self, from: await send(req))
+        if reply.status == "saved", let text = reply.instructions { return .saved(text) }
+        return .requested
+    }
+
     func status() async throws -> RelayStatus {
         try JSONDecoder().decode(RelayStatus.self, from: await send(request("v1/status")))
     }

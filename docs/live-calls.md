@@ -151,6 +151,29 @@ The voice agent tells the user it is checking and keeps talking. An unanswered a
 
 `reason`: `user_hung_up`, `agent_hung_up`, `no_minutes`, `failed`. No reply is needed. This is the only event Herb retries (see [Webhooks](#webhooks)).
 
+### `agent.setup`
+
+Sent when the user taps Set Up Instructions in the agent's settings. It asks the handler to write what the voice agent should know at the start of every call, and it checks the webhook: if delivery fails, the phone shows why.
+
+```json
+"data": {
+  "agent": "Codex",
+  "current_instructions": null,
+  "request": "Herb's voice agent talks with the user in live phone calls..."
+}
+```
+
+`call_id` is `null`. Reply within **10 seconds** with `{"instructions": "..."}`, or collect the information first and send it later:
+
+```sh
+curl -X PUT https://herb.grosst.cc/v1/live/instructions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"instructions":"The user is ...","agent_id":"<agent_id from the event>"}'
+```
+
+Over MCP: `live_set_instructions`. Each agent has its own instructions. Without `agent_id` they are saved for the calling agent; with it, for that agent of the same account.
+
 ## Answering later
 
 With the agent token:
@@ -188,6 +211,7 @@ Over MCP (`https://herb.grosst.cc/mcp`):
 | `live_call_reply` `{text}` | Answers the open question, or, with none open, the voice agent tells the user. |
 | `live_call_context` `{text}` | Adds silent context. |
 | `live_call_hang_up` | Ends the call. |
+| `live_set_instructions` `{instructions, agent_id?}` | Saves the voice agent's instructions for an agent. |
 | `phone_call` `{text, live: true}` | Starts a live call to the user. |
 
 Over HTTP, with the agent token:
@@ -273,7 +297,7 @@ curl -X PATCH https://herb.grosst.cc/v1/bots/<agent id> \
   -d '{"instructions":"Be brief.","webhook_url":"https://example.com/herb"}'
 ```
 
-- `instructions`: how the voice agent behaves in every call, up to 4,000 characters. `null` clears.
+- `instructions`: how the voice agent behaves in every call, up to 8,000 characters. `null` clears.
 - `webhook_url`: a new URL returns a new `webhook_secret`, shown only in this response. `null` removes the webhook.
 - `webhook_secret`: your own signing secret, 8 to 300 characters, instead of a generated one. Needs a webhook URL.
 

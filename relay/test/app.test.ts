@@ -506,6 +506,7 @@ describe("mcp", () => {
       ["live_call_status", true],
       ["live_call_reply", false],
       ["live_call_context", false],
+      ["live_set_instructions", false],
       ["live_call_hang_up", false],
       ["phone_call_status", true],
     ]);

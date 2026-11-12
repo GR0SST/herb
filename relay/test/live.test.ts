@@ -166,6 +166,41 @@ describe("agent settings", () => {
     expect((await req(`/v1/bots/${botId}`, devToken, { method: "PATCH", body: { webhook_secret: "another-secret" } })).status).toBe(400);
   });
 
+  test("setup asks the handler for instructions and saves an immediate reply", async () => {
+    await setWebhook();
+    hookReply = () => json({ instructions: "The user is Grosst. Speak Ukrainian." });
+    const response = await req(`/v1/bots/${botId}/setup`, devToken, { body: {} });
+    expect(await response.json()).toEqual({ status: "saved", instructions: "The user is Grosst. Speak Ukrainian." });
+    expect(hits[0]!.event).toMatchObject({ type: "agent.setup", call_id: null, data: { agent: "Codex", current_instructions: null } });
+    expect(String(hits[0]!.event.data.request)).toContain("live_set_instructions");
+    expect(store.bot(botId)!.live_instructions).toBe("The user is Grosst. Speak Ukrainian.");
+  });
+
+  test("setup reports why the webhook failed", async () => {
+    const setup = async () => (await (await req(`/v1/bots/${botId}/setup`, devToken, { body: {} })).json()) as { error?: { message: string }; status?: string };
+    expect((await setup()).error?.message).toBe("No webhook or listener is set up");
+    await setWebhook();
+    hookReply = () => new Response("nope", { status: 404 });
+    expect((await setup()).error?.message).toBe("The webhook answered with HTTP 404");
+    hookReply = () => new Response(null, { status: 202 });
+    expect((await setup()).status).toBe("requested");
+  });
+
+  test("each agent keeps its own instructions", async () => {
+    const chief = store.addBot({ accountId, name: "Chief" });
+    const set = (token: string, body: Record<string, unknown>) => req("/v1/live/instructions", token, { method: "PUT", body });
+    expect((await set(botToken, { instructions: "Codex rules" })).status).toBe(200);
+    expect((await set(chief.token, { instructions: "Chief rules" })).status).toBe(200);
+    expect(store.bot(botId)!.live_instructions).toBe("Codex rules");
+    expect(store.bot(chief.id)!.live_instructions).toBe("Chief rules");
+    // Answering a setup request for another agent of the account names it explicitly.
+    expect((await set(chief.token, { instructions: "Codex rules v2", agent_id: botId })).status).toBe(200);
+    expect(store.bot(botId)!.live_instructions).toBe("Codex rules v2");
+    expect(store.bot(chief.id)!.live_instructions).toBe("Chief rules");
+    expect((await set(otherBotToken, { instructions: "x", agent_id: botId })).status).toBe(404);
+    expect((await set(botToken, { instructions: "x".repeat(8001) })).status).toBe(400);
+  });
+
   test("rejects private and non-https webhooks", async () => {
     expect((await setWebhook("http://hooks.example.com/x")).status).toBe(400);
     expect((await setWebhook("https://127.0.0.1/x")).status).toBe(400);
@@ -174,7 +209,7 @@ describe("agent settings", () => {
   });
 
   test("instructions are limited and can be cleared", async () => {
-    const long = await req(`/v1/bots/${botId}`, devToken, { method: "PATCH", body: { instructions: "x".repeat(4001) } });
+    const long = await req(`/v1/bots/${botId}`, devToken, { method: "PATCH", body: { instructions: "x".repeat(8001) } });
     expect(long.status).toBe(400);
     await req(`/v1/bots/${botId}`, devToken, { method: "PATCH", body: { instructions: "Be brief" } });
     expect(store.bot(botId)!.live_instructions).toBe("Be brief");

@@ -54,7 +54,7 @@ export type AskResult =
 
 export const LIVE_LIMITS = {
   context: 16_000,
-  instructions: 4_000,
+  instructions: 8_000,
   greeting: 300,
   answer: 8_000,
   say: 2_000,
@@ -63,7 +63,18 @@ export const LIVE_LIMITS = {
   openAsks: 3,
   message: 64 * 1024,
 };
-export const LIVE_TIMEOUTS = { started: 3_000, ask: 5_000, askExpiry: 5 * 60_000, ended: 10_000 };
+export const LIVE_TIMEOUTS = { started: 3_000, ask: 5_000, askExpiry: 5 * 60_000, ended: 10_000, setup: 10_000 };
+
+/** What agent.setup asks the handler for. */
+export const SETUP_REQUEST = `Herb's voice agent talks with the user in live phone calls on behalf of this agent, and passes questions it cannot answer back to you. Write the instructions it gets at the start of every call, so it does not start from scratch:
+- who the user is and how to address them;
+- which language to speak;
+- the projects, agents and tools behind this agent, and what each one does;
+- current priorities and ongoing work worth knowing;
+- what the voice agent may answer itself and what it must pass back to you;
+- tone and length of replies.
+Plain text for a speech model, up to 8000 characters. No passwords, keys or other secrets.
+Reply with {"instructions": "..."} in the response, or send them later with the live_set_instructions tool or PUT /v1/live/instructions.`;
 const RETRY_DELAYS = [10_000, 60_000, 600_000, 3_600_000];
 const ASK_TRANSCRIPT_LINES = 20;
 const MAX_TRANSCRIPT_LINES = 2_000;
@@ -94,8 +105,9 @@ interface LiveCall {
 
 interface Event {
   id: string;
-  type: "call.started" | "agent.ask" | "call.ended";
-  call_id: string;
+  type: "call.started" | "agent.ask" | "call.ended" | "agent.setup";
+  /** Null for events outside a call, such as agent.setup. */
+  call_id: string | null;
   agent_id: string;
   created_at: number;
   data: Record<string, unknown>;
@@ -103,7 +115,8 @@ interface Event {
 
 type Reply = Record<string, unknown>;
 /** reached: someone got the event. reply: what they answered in time, if anything. */
-type Delivery = { reached: boolean; reply: Reply | null };
+/** error says why nothing was reached, for the person setting the webhook up. */
+type Delivery = { reached: boolean; reply: Reply | null; error?: string };
 
 export interface LiveOptions {
   store: Store;
@@ -204,13 +217,14 @@ export function createLive(options: LiveOptions) {
       } catch {
         clearTimeout(timer);
         waiting.delete(event.id);
-        resolve({ reached: false, reply: null });
+        resolve({ reached: false, reply: null, error: "The listener connection dropped" });
       }
     });
   }
 
   async function viaWebhook(bot: Bot, event: Event, timeoutMs: number): Promise<Delivery> {
-    if (!bot.webhook_url || !bot.webhook_secret || !(await safeWebhook(bot.webhook_url))) return { reached: false, reply: null };
+    if (!bot.webhook_url || !bot.webhook_secret) return { reached: false, reply: null, error: "No webhook or listener is set up" };
+    if (!(await safeWebhook(bot.webhook_url))) return { reached: false, reply: null, error: "The webhook address is private or does not resolve" };
     const body = JSON.stringify(event);
     const timestamp = Math.floor(now() / 1000);
     try {
@@ -230,7 +244,9 @@ export function createLive(options: LiveOptions) {
         },
         body,
       });
-      if (response.status < 200 || response.status >= 300) return { reached: false, reply: null };
+      if (response.status < 200 || response.status >= 300) {
+        return { reached: false, reply: null, error: `The webhook answered with HTTP ${response.status}` };
+      }
       if (response.status !== 200) return { reached: true, reply: null };
       const raw = (await response.text()).slice(0, LIVE_LIMITS.message);
       try {
@@ -239,8 +255,9 @@ export function createLive(options: LiveOptions) {
       } catch {
         return { reached: true, reply: null };
       }
-    } catch {
-      return { reached: false, reply: null };
+    } catch (error) {
+      const timedOut = (error as Error).name === "TimeoutError";
+      return { reached: false, reply: null, error: timedOut ? "The webhook did not answer in time" : "Could not connect to the webhook" };
     }
   }
 
@@ -253,6 +270,20 @@ export function createLive(options: LiveOptions) {
 
   function event(live: LiveCall, type: Event["type"], data: Record<string, unknown>): Event {
     return { id: newId("evt"), type, call_id: live.call.id, agent_id: live.bot.id, created_at: now(), data };
+  }
+
+  /** Asks the handler for the voice agent's instructions. It also checks that the webhook works. */
+  async function requestSetup(bot: Bot) {
+    const setup: Event = {
+      id: newId("evt"),
+      type: "agent.setup",
+      call_id: null,
+      agent_id: bot.id,
+      created_at: now(),
+      data: { agent: bot.name, current_instructions: bot.live_instructions, request: SETUP_REQUEST },
+    };
+    const { reached, reply, error } = await deliver(bot, setup, LIVE_TIMEOUTS.setup);
+    return { reached, error: error ?? null, instructions: text(reply?.instructions, LIVE_LIMITS.instructions) || null };
   }
 
   /** The only event worth retrying: the moment of the others is gone by then. */
@@ -517,6 +548,7 @@ export function createLive(options: LiveOptions) {
     hangup,
     tick,
     act,
+    requestSetup,
     current,
     reply,
     attachListener,
