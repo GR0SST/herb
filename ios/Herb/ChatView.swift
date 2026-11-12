@@ -36,7 +36,7 @@ struct ChatView: View {
             .scrollDismissesKeyboard(.interactively)
             .overlay {
                 if store.messages.isEmpty && !store.isStreaming {
-                    ContentUnavailableView("Message \(bot.name)", systemImage: "bubble.left")
+                    AgentContactCard(bot: bot)
                 }
             }
             .onChange(of: store.messages.last?.content) { proxy.scrollTo("bottom", anchor: .bottom) }

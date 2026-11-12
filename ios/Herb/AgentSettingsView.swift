@@ -9,15 +9,43 @@ struct AgentToolbar: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
-            if model.status?.live?.available == true {
-                Button("Call", systemImage: "phone") { model.callCenter.callAgent(bot) }
-                    .disabled(model.callCenter.active != nil)
-            }
             if bot.live != nil {
                 Button("Agent Settings", systemImage: "slider.horizontal.3") { editing = true }
                     .sheet(isPresented: $editing) { AgentSettingsView(bot: bot) }
             }
+            if model.status?.live?.available == true {
+                CallAgentButton(bot: bot, size: 32)
+            }
         }
+    }
+}
+
+/// The top of an agent's screen, like a contact card: picture, name and a big call button.
+struct AgentContactCard: View {
+    @Environment(AppModel.self) private var model
+    let bot: Bot
+
+    var body: some View {
+        VStack(spacing: 10) {
+            AgentAvatar(name: bot.name, size: 96)
+            Text(bot.name).font(.title2.weight(.semibold))
+            if model.status?.live?.available == true {
+                Button {
+                    model.callCenter.callAgent(bot)
+                } label: {
+                    Label("Call", systemImage: "phone.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: 220, minHeight: 50)
+                        .background(Color.green, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(model.callCenter.active != nil)
+                .padding(.top, 6)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
     }
 }
 

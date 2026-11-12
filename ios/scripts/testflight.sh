@@ -10,11 +10,6 @@ WORK_DIR="${HERB_RELEASE_DIR:-$(mktemp -d)}"
 ARCHIVE="$WORK_DIR/Herb.xcarchive"
 OPTIONS="$WORK_DIR/ExportOptions.plist"
 
-if [ ! -f "$IOS_DIR/Herb/Models/vector_estimator.onnx" ]; then
-  echo "Voice model is missing. Run: bun run ios/scripts/fetch-models.ts" >&2
-  exit 1
-fi
-
 xcodebuild archive \
   -project "$IOS_DIR/Herb.xcodeproj" -scheme Herb -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$ARCHIVE" \

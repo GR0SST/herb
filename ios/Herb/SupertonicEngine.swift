@@ -41,7 +41,9 @@ final class SupertonicEngine: @unchecked Sendable {
 
     private func engine() throws -> (env: ORTEnv, tts: TextToSpeech, style: Style) {
         if let loaded { return loaded }
-        guard let root = Bundle.main.resourcePath else { throw APIError.message("Voice model files are missing") }
+        // Downloaded in Settings. Without it the iOS voice speaks.
+        guard VoiceModel.isInstalled else { throw APIError.message("The voice is not downloaded") }
+        let root = VoiceModel.directory.path
         let env = try ORTEnv(loggingLevel: .warning)
         let tts = try loadTextToSpeech(root, false, env)
         let style = try loadVoiceStyle(["\(root)/\(Self.voice).json"], verbose: false)

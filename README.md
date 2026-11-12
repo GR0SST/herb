@@ -50,17 +50,11 @@ Limits: 6 calls per minute per agent, 200 calls per day per account, 50 agents p
 
 ## Speech
 
-Supertonic 3 runs on the phone: voice Lily (F2), 8 steps, speed 1.2. Text is split into phrases. The first is generated while the phone rings, the rest during playback. If the model fails or takes over 10 seconds, the iOS voice reads the text.
+Supertonic 3 runs on the phone: voice Lily (F2), 8 steps, speed 1.2. The app downloads it (about 380 MB) in Settings, so the app itself stays small; until then the iOS voice reads messages. Text is split into phrases. The first is generated while the phone rings, the rest during playback. If the model fails or takes over 10 seconds, the iOS voice reads the text.
 
 The server accepts any text. Agents add stress marks (U+0301) for Russian and Ukrainian, because the voice mispronounces words without them. Without `language` the phone detects the language.
 
 ## Build the app
-
-The model weights (about 380 MB) are not in Git:
-
-```sh
-bun run ios/scripts/fetch-models.ts
-```
 
 Open `ios/Herb.xcodeproj`, set your team and bundle ID, then run on an iPhone.
 

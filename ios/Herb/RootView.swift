@@ -115,18 +115,40 @@ struct AgentsView: View {
 }
 
 struct AgentRow: View {
+    @Environment(AppModel.self) private var model
     let bot: Bot
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(bot.name.prefix(1).uppercased())
-                .font(.headline)
-                .foregroundStyle(Color(.systemBackground))
-                .frame(width: 40, height: 40)
-                .background(Color.accentColor, in: Circle())
-                .accessibilityHidden(true)
+            AgentAvatar(name: bot.name, size: 44)
             Text(bot.name).font(.body.weight(.medium))
+            Spacer(minLength: 8)
+            if model.status?.live?.available == true {
+                CallAgentButton(bot: bot, size: 36)
+            }
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// Green round phone button that starts a live call with the agent.
+struct CallAgentButton: View {
+    @Environment(AppModel.self) private var model
+    let bot: Bot
+    var size: CGFloat = 36
+
+    var body: some View {
+        Button {
+            model.callCenter.callAgent(bot)
+        } label: {
+            Image(systemName: "phone.fill")
+                .font(.system(size: size * 0.42, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background(Color.green, in: Circle())
+        }
+        .buttonStyle(.borderless)
+        .disabled(model.callCenter.active != nil)
+        .accessibilityLabel("Call \(bot.name)")
     }
 }

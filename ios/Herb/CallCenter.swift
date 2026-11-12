@@ -57,6 +57,7 @@ final class CallCenter: NSObject {
     @ObservationIgnored private var audioActive = false
     @ObservationIgnored private var pending: (id: UUID, message: Message)?
     @ObservationIgnored private var liveCall: (id: UUID, connection: LiveConnection)?
+    @ObservationIgnored private let ringback = Ringback()
 
     private enum Message {
         case text(String, language: String?)
@@ -240,7 +241,12 @@ final class CallCenter: NSObject {
         }
         let connection = LiveConnection()
         connection.muted = session.muted
-        connection.onTranscript = { [weak self] speaker, delta in self?.hear(id, speaker, delta) }
+        connection.onTranscript = { [weak self] speaker, delta in
+            self?.hear(id, speaker, delta)
+            // Speech means the agent is on the line, even if the start event was missed.
+            self?.agentReady(id)
+        }
+        connection.onReady = { [weak self] in self?.agentReady(id) }
         connection.onEnded = { [weak self] note in
             self?.finish(id, relayStatus: nil, note: note)
             self?.endSystemCall(id)
@@ -261,12 +267,22 @@ final class CallCenter: NSObject {
                 return
             }
             try await connection.accept(answer: started.voice.sdp)
-            sessions[id]?.phase = .live
-            if useCallKit && session.outgoing { provider.reportOutgoingCall(with: id, connectedAt: nil) }
+            // Ringback plays until the voice agent is on the line. Give up waiting after a few seconds.
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(8))
+                self?.agentReady(id)
+            }
         } catch {
             connection.close()
             finishAfterFailure(id, error.localizedDescription)
         }
+    }
+
+    private func agentReady(_ id: UUID) {
+        guard sessions[id]?.phase == .connecting, liveCall?.id == id else { return }
+        ringback.stop()
+        sessions[id]?.phase = .live
+        if useCallKit, sessions[id]?.outgoing == true { provider.reportOutgoingCall(with: id, connectedAt: nil) }
     }
 
     /// Transcript pieces arrive word by word: they join into lines per speaker.
@@ -312,6 +328,7 @@ final class CallCenter: NSObject {
         if !useCallKit {
             try? AVAudioSession.sharedInstance().setActive(true)
         }
+        if let session = active, session.live, session.phase == .connecting { ringback.start() }
         playIfReady()
     }
 
@@ -389,6 +406,7 @@ final class CallCenter: NSObject {
         if liveCall?.id == id {
             liveCall?.connection.close()
             liveCall = nil
+            ringback.stop()
         }
         // The server tracks an answered live call itself: the phone only says it hung up.
         let liveAnswered = session.live && session.phase != .ringing
@@ -451,6 +469,7 @@ extension CallCenter: CXProviderDelegate {
     nonisolated func providerDidReset(_ provider: CXProvider) {
         MainActor.assumeIsolated {
             player.stop()
+            ringback.stop()
             pending = nil
             audioActive = false
             for id in sessions.keys { finish(id, relayStatus: nil) }

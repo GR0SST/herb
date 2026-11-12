@@ -9,6 +9,8 @@ final class LiveConnection: NSObject {
     enum Speaker { case user, agent }
 
     var onTranscript: (Speaker, String) -> Void = { _, _ in }
+    /// The voice agent is on the line.
+    var onReady: () -> Void = {}
     /// The call ended on the other side or the connection dropped.
     var onEnded: (String) -> Void = { _ in }
 
@@ -115,6 +117,8 @@ final class LiveConnection: NSObject {
             if let delta = event["delta"] as? String { onTranscript(.user, delta) }
         case "session.output_transcript.delta":
             if let delta = event["delta"] as? String { onTranscript(.agent, delta) }
+        case "session.started":
+            onReady()
         case "session.closed":
             finish("Ended")
         default:

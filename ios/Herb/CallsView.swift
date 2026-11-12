@@ -18,12 +18,18 @@ struct CallsView: View {
     }
 
     private var list: some View {
-        List(records) { CallRow(record: $0, showAgent: bot == nil) }
-            .overlay {
-                if records.isEmpty {
-                    ContentUnavailableView("No Calls", systemImage: "phone")
-                }
+        List {
+            if let bot {
+                Section { AgentContactCard(bot: bot) }
+                    .listRowBackground(Color.clear)
             }
+            ForEach(records) { CallRow(record: $0, showAgent: bot == nil) }
+        }
+        .overlay {
+            if records.isEmpty && bot == nil {
+                ContentUnavailableView("No Calls", systemImage: "phone")
+            }
+        }
             .navigationTitle(bot?.name ?? "Calls")
             .refreshable { await model.refresh() }
     }
@@ -81,14 +87,9 @@ struct ActiveCallView: View {
     private func content(_ session: CallSession) -> some View {
         VStack(spacing: 16) {
             Spacer()
-            Text(session.botName.prefix(1).uppercased())
-                .font(.system(size: 48, weight: .semibold))
-                .foregroundStyle(Color(.systemBackground))
-                .frame(width: 112, height: 112)
-                .background(Color.accentColor, in: Circle())
-                .accessibilityHidden(true)
+            AgentAvatar(name: session.botName, size: 112)
             Text(session.botName).font(.largeTitle.weight(.semibold))
-            Text(phaseLabel(session.phase)).font(.title3).foregroundStyle(.secondary)
+            Text(phaseLabel(session)).font(.title3).foregroundStyle(.secondary)
             if let title = session.title {
                 Text(title).font(.headline).multilineTextAlignment(.center)
             }
@@ -110,10 +111,10 @@ struct ActiveCallView: View {
         .background(Color(.systemBackground))
     }
 
-    private func phaseLabel(_ phase: CallSession.Phase) -> String {
-        switch phase {
+    private func phaseLabel(_ session: CallSession) -> String {
+        switch session.phase {
         case .ringing: "Calling…"
-        case .connecting: "Connecting…"
+        case .connecting: session.live ? "Calling…" : "Connecting…"
         case .playing: "Speaking"
         case .live: "Live"
         case .waiting(let note): note
