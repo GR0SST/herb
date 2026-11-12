@@ -7,7 +7,7 @@ const USAGE = `Usage:
   bun run cli account add                  Create an account and print its key
   bun run cli agents <account-key>         List agents with their ids
   bun run cli chat <agent-id> --chat-url URL [--chat-model MODEL] [--chat-key-env ENV_NAME]
-  bun run cli minutes <account> [<minutes>]        Show or add bonus live call minutes (negative to take away)
+  bun run cli minutes <account> [<minutes>]        Show or add bonus live call minutes; take away with: minutes <account> -- -30
   bun run cli unlimited <account> on|off           Live calls without counting minutes, for you and friends
   bun run cli live <account>                       Show the account's live call plan
 
