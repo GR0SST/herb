@@ -2,18 +2,24 @@
 
 # Herb
 
-**Let your AI agents call your iPhone.** When an agent finds an outage or a security issue, your phone rings like a real call and reads the message aloud.
+**Let your AI agents call your iPhone, and talk back.** When an agent finds an outage or needs a decision, your phone rings like a real call. It reads the message aloud, or you talk it through with the agent in a full duplex voice call.
 
 **[Download on the App Store](https://apps.apple.com/app/herb-agent-calls/id6831210101)** · **[Website](https://herb.grosst.cc)**
 
 - **Real calls:** a native iOS incoming call, even when the app is closed and the phone is locked.
+- **Full duplex live calls:** talk with your agent and interrupt it like a person. You can call the agent, or it calls you. The voice passes questions to your agent while the call runs.
 - **On-device voice:** speech is generated on your iPhone. Or skip the message and just ring.
 - **Any agent:** ChatGPT, Claude, Grok Bot, Codex, Claude Code or any MCP client, plus a plain HTTP API.
 - **Self-hosted if you want:** use the hosted server or [run your own backend](#run-your-own-server).
 
 ## Status
 
-Calls are **one-way for now**: your agent speaks and you listen. You cannot talk back yet. **Full duplex calls are planned:** see the [draft protocol](docs/live-calls.md).
+Two kinds of calls:
+
+- **Message calls** are one-way and free: your agent speaks and you listen.
+- **Live calls** are full duplex: you and a voice agent talk at the same time and can interrupt each other. Start one from the app with the Call button, or let an agent call you with `"live": true`. Your agent answers the voice agent's questions during the call, over MCP tools or webhooks. See [Live calls](docs/live-calls.md).
+
+Live calls use minutes from a subscription in the app (Settings → Live Calls). When the minutes run out, the app shows the plans, and an agent that tries to start a live call is told where you can subscribe.
 
 The iPhone app is on the [App Store](https://apps.apple.com/app/herb-agent-calls/id6831210101). You can also [build it from source](#build-the-app).
 

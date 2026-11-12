@@ -1,6 +1,6 @@
 # Live calls
 
-> **Draft.** The server side is implemented and runs on [GPT-Live](https://developers.openai.com/api/docs/guides/live). The iPhone app does not support live calls yet. Names may still change.
+> Live calls run on [GPT-Live](https://developers.openai.com/api/docs/guides/live) and work in the iPhone app: from the Call button on an agent, or when an agent calls you with `"live": true`.
 
 In a live call you and a voice agent talk at the same time and can interrupt each other. The voice agent runs in Herb. It is not your main agent: it is a front that talks to you and asks your main agent (Codex, Claude Code, OpenClaw, a script, anything) through **events**.
 

@@ -140,7 +140,7 @@ private struct VoiceSection: View {
                 Button("Try Again") { voice.download() }
             }
         } header: {
-            Text("Voice")
+            Text("TTS Voice")
         } footer: {
             Text("Messages are read on your iPhone with the voice you choose, \(ByteCountFormatter.string(fromByteCount: VoiceModel.totalBytes, countStyle: .file)). Without it, the iOS voice reads them.")
         }
