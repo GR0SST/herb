@@ -4,6 +4,7 @@ import type { PushSender } from "./apns";
 import { clearSessionCookie, readCookie, SESSION_COOKIE, sessionCookie } from "./cookies";
 import { type Bot, type Call, type CallStatus, type Device, type Store, TEST_AGENT_NAME } from "./db";
 import { clientIp, WindowLimiter } from "./limits";
+import { createLive, LIVE_LIMITS, type Direction, type LiveAction, type Listener, type VoiceEngine, webhookUrlError } from "./live";
 import { handleMcp, type McpActions } from "./mcp";
 import type { OAuth } from "./oauth";
 import { notFoundPage, serveSite } from "./site";
@@ -27,6 +28,7 @@ const MAX_CHAT_CHARS = 200_000;
 const MAX_NAME = 40;
 const AUDIO_MIMES = new Set(["audio/mpeg", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/wav", "audio/x-wav"]);
 const DEVICE_STATUSES: readonly CallStatus[] = ["answered", "played", "declined", "missed", "failed"];
+const LIVE_ACTIONS = new Set(["answer", "say", "context", "hangup"]);
 
 export interface AppOptions {
   store: Store;
@@ -39,6 +41,27 @@ export interface AppOptions {
   env?: Record<string, string | undefined>;
   now?: () => number;
   fetchImpl?: typeof fetch;
+  /** Speech model for live calls. Without it live calls are off. */
+  voice?: VoiceEngine | null;
+  /** Charge live calls against bought minutes. */
+  billing?: boolean;
+  /** Let webhooks reach private addresses. Only for self-hosted servers. */
+  allowPrivateWebhooks?: boolean;
+  resolveHost?: (host: string) => Promise<string[]>;
+  webhookRetryDelays?: number[];
+}
+
+/** Data attached to an agent's event listener connection. */
+export interface ListenerData {
+  botId: string;
+}
+
+/** The parts of Bun's server and socket the app needs, so tests can fake them. */
+interface Upgrader {
+  upgrade(request: Request, options: { data: ListenerData }): boolean;
+}
+interface ListenerSocket extends Listener {
+  data: ListenerData;
 }
 
 /** Who is calling: a phone by token or a browser by session. */
@@ -64,6 +87,8 @@ const publicCall = (call: Call) => ({
   language: call.language,
   has_audio: call.audio_mime !== null,
   status: call.status,
+  live: call.live === 1,
+  ...(call.live ? { ended_reason: call.ended_reason, duration_s: call.duration_s } : {}),
   created_at: call.created_at,
   updated_at: call.updated_at,
 });
@@ -125,6 +150,17 @@ export function createApp(options: AppOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const accounts = createAccounts(store, { open: options.openRegistration ?? true, now });
   oauth?.useAccounts(accounts);
+  const voice = options.voice ?? null;
+  const allowPrivateWebhooks = options.allowPrivateWebhooks ?? false;
+  const live = createLive({
+    store,
+    now,
+    fetchImpl,
+    billing: options.billing ?? false,
+    allowPrivateWebhooks,
+    resolveHost: options.resolveHost,
+    retryDelays: options.webhookRetryDelays,
+  });
   const origin = options.publicUrl ? new URL(options.publicUrl).origin : null;
   const audioDir = join(dataDir, "audio");
   mkdirSync(audioDir, { recursive: true });
@@ -152,6 +188,13 @@ export function createApp(options: AppOptions) {
     const title = typeof args.title === "string" ? args.title.trim().slice(0, 120) : "";
     const key = typeof args.idempotency_key === "string" && args.idempotency_key ? args.idempotency_key.slice(0, 200) : undefined;
     const reject = (code: string, message: string, status = 400) => ({ status, body: { error: { code, message } } });
+    const isLive = args.live === true;
+    if (isLive) {
+      if (!voice) return reject("live_unavailable", "Live calls are not available on this server", 503);
+      if (audioB64) return reject("invalid_content", "A live call takes text, not audio");
+      const blocked = live.canStart(bot.account_id);
+      if (blocked === "no_minutes") return reject("no_minutes", "No live call minutes left", 402);
+    }
 
     // Text and audio are optional: a call without a message just rings.
     if (text && audioB64) return reject("invalid_content", "Send either text or audio_base64, not both");
@@ -188,6 +231,7 @@ export function createApp(options: AppOptions) {
       audioMime,
       audioBytes: audio?.length,
       idempotencyKey: key,
+      live: isLive,
       now: now(),
     });
     if (audio) await Bun.write(audioPath(call.id), audio);
@@ -245,6 +289,81 @@ export function createApp(options: AppOptions) {
     return new Response(upstream.body, {
       headers: { "content-type": "text/event-stream", "cache-control": "no-store" },
     });
+  }
+
+  /** Connects an answered live call to the speech model. */
+  async function connectLive(call: Call, bot: Bot, direction: Direction, request: Request) {
+    const body = (await readJson<Record<string, unknown>>(request)) ?? {};
+    const setup = await live.start(call, bot, direction);
+    try {
+      const opened = await voice!.open({ call, bot, setup, controls: live.controls(call.id), body });
+      live.attachVoice(call.id, opened.session);
+      return Response.json({ call: publicCall(store.call(call.id)!), voice: opened.client }, { status: 201 });
+    } catch (error) {
+      console.error(`voice failed call=${call.id}: ${(error as Error).message}`);
+      live.end(call.id, "failed");
+      return err(502, "voice_unavailable", "Could not connect the voice agent");
+    }
+  }
+
+  function liveBlocked(accountId: string) {
+    if (!voice) return err(503, "live_unavailable", "Live calls are not available on this server");
+    const blocked = live.canStart(accountId);
+    if (blocked === "no_minutes") return err(402, "no_minutes", "No live call minutes left");
+    if (blocked === "call_in_progress") return err(409, "call_in_progress", "Another live call is in progress");
+    return null;
+  }
+
+  /** The phone calls an agent. */
+  async function startInbound(accountId: string, request: Request) {
+    const body = await readJson<{ bot_id?: unknown }>(request.clone());
+    if (!body) return err(400, "invalid_json", "Invalid JSON");
+    const bot = typeof body.bot_id === "string" ? store.bot(body.bot_id) : null;
+    if (!bot || bot.account_id !== accountId || bot.name === TEST_AGENT_NAME) return err(404, "not_found", "Agent not found");
+    const blocked = liveBlocked(accountId);
+    if (blocked) return blocked;
+    const call = store.createCall({ botId: bot.id, live: true, status: "answered", now: now() });
+    return connectLive(call, bot, "inbound", request);
+  }
+
+  /** The phone answered an agent's live call. */
+  async function answerOutbound(accountId: string, call: Call, request: Request) {
+    if (!call.live) return err(409, "not_live", "This is not a live call");
+    if (call.status !== "ringing" && call.status !== "answered") return err(409, "call_ended", "The call has ended");
+    const blocked = liveBlocked(accountId);
+    if (blocked) return blocked;
+    store.transition(call.id, "answered", now());
+    return connectLive(store.call(call.id)!, store.bot(call.bot_id)!, "outbound", request);
+  }
+
+  const ownerBot = (bot: Bot) => ({
+    ...publicBot(bot),
+    live: { instructions: bot.live_instructions, webhook_url: bot.webhook_url, listener: live.listenerConnected(bot.id) },
+  });
+
+  async function updateBot(bot: Bot, request: Request) {
+    const body = await readJson<{ instructions?: unknown; webhook_url?: unknown }>(request);
+    if (!body) return err(400, "invalid_json", "Invalid JSON");
+    let instructions: string | null | undefined;
+    if (body.instructions !== undefined) {
+      if (body.instructions !== null && typeof body.instructions !== "string") return err(400, "invalid_instructions", "Instructions must be text");
+      instructions = typeof body.instructions === "string" ? body.instructions.trim() || null : null;
+      if (instructions && instructions.length > LIVE_LIMITS.instructions) {
+        return err(400, "invalid_instructions", `Instructions are longer than ${LIVE_LIMITS.instructions} characters`);
+      }
+    }
+    let webhookUrl: string | null | undefined;
+    if (body.webhook_url !== undefined) {
+      if (body.webhook_url !== null && typeof body.webhook_url !== "string") return err(400, "invalid_webhook_url", "Webhook URL must be text");
+      webhookUrl = typeof body.webhook_url === "string" ? body.webhook_url.trim() || null : null;
+      if (webhookUrl) {
+        const problem = webhookUrlError(webhookUrl, allowPrivateWebhooks);
+        if (problem) return err(400, "invalid_webhook_url", problem);
+        if (!(await live.safeWebhook(webhookUrl))) return err(400, "invalid_webhook_url", "Webhook URL must be a public address");
+      }
+    }
+    const secret = store.setBotLive(bot.id, { instructions, webhookUrl });
+    return Response.json({ ...ownerBot(store.bot(bot.id)!), ...(secret ? { webhook_secret: secret } : {}) });
   }
 
   async function createBot(accountId: string, request: Request) {
@@ -316,6 +435,11 @@ export function createApp(options: AppOptions) {
         push_registered: device ? Boolean(device.voip_token) : phones.some((p) => p.voip_token),
         phones: phones.length,
         mcp_url: options.publicUrl ? `${options.publicUrl}/mcp` : null,
+        live: {
+          available: Boolean(voice),
+          billing: options.billing ?? false,
+          seconds_left: options.billing ? store.liveSeconds(accountId) : null,
+        },
       });
     }
     if (resource === "account" && !id && method === "DELETE") {
@@ -352,7 +476,7 @@ export function createApp(options: AppOptions) {
       return new Response(null, { status: 204 });
     }
     if (resource === "bots" && !id && method === "GET") {
-      return Response.json({ bots: store.listBots(accountId).map(publicBot) });
+      return Response.json({ bots: store.listBots(accountId).map(ownerBot) });
     }
     if (resource === "bots" && !id && method === "POST") return createBot(accountId, request);
     if (resource === "bots" && id) {
@@ -364,6 +488,11 @@ export function createApp(options: AppOptions) {
         return new Response(null, { status: 204 });
       }
       if (action === "chat" && method === "POST") return chat(bot, request);
+      if (!action && method === "PATCH") return updateBot(bot, request);
+    }
+    if (resource === "live" && !id && method === "POST") {
+      if (!device) return err(403, "forbidden", "Only for phones");
+      return startInbound(accountId, request);
     }
     if (resource === "test-call" && !id && method === "POST") {
       const body = await readJson<Record<string, unknown>>(request);
@@ -384,6 +513,15 @@ export function createApp(options: AppOptions) {
       const call = store.callForAccount(id, accountId);
       if (!call) return err(404, "not_found", "Call not found");
       if (!action && method === "GET") return Response.json(publicCall(call));
+      if (action === "live" && method === "POST") {
+        if (!device) return err(403, "forbidden", "Only for phones");
+        return answerOutbound(accountId, call, request);
+      }
+      if (action === "end" && method === "POST") {
+        if (!device) return err(403, "forbidden", "Only for phones");
+        live.end(call.id, "user_hung_up");
+        return Response.json(publicCall(store.call(call.id)!));
+      }
       if (action === "audio" && method === "GET") {
         const file = Bun.file(audioPath(call.id));
         if (!call.audio_mime || !(await file.exists())) return err(404, "not_found", "No audio");
@@ -464,6 +602,12 @@ export function createApp(options: AppOptions) {
           const { status, body } = callStatusForBot(bot, rest[1]);
           return Response.json(body, { status });
         }
+        const action = rest[2] === "answers" ? "answer" : rest[2];
+        if (rest[0] === "calls" && rest[1] && rest.length === 3 && request.method === "POST" && LIVE_ACTIONS.has(action!)) {
+          const body = (await readJson<Record<string, unknown>>(request)) ?? {};
+          const { status, body: result } = live.act(bot, rest[1], action as LiveAction, body);
+          return Response.json(result, { status });
+        }
         return err(403, "forbidden", "Agent tokens cannot do this");
       }
       const device = store.deviceByToken(token);
@@ -478,6 +622,30 @@ export function createApp(options: AppOptions) {
     return accountRoute({ accountId, device: null }, request, rest);
   }
 
+  /** Agent event listener: a WebSocket on /v1/events. Returns null for other paths, undefined once upgraded. */
+  function upgrade(request: Request, server: Upgrader): Response | undefined | null {
+    if (new URL(request.url).pathname !== "/v1/events") return null;
+    const token = bearer(request);
+    const bot = token ? botFor(token) : null;
+    if (!bot) return err(401, "unauthorized", "Agent token required");
+    if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") return err(426, "upgrade_required", "Connect with a WebSocket");
+    return server.upgrade(request, { data: { botId: bot.id } }) ? undefined : err(400, "upgrade_failed", "WebSocket upgrade failed");
+  }
+
+  const websocket = {
+    open(socket: ListenerSocket) {
+      live.attachListener(socket.data.botId, socket);
+    },
+    message(socket: ListenerSocket, message: string | Buffer) {
+      const bot = store.bot(socket.data.botId);
+      if (!bot) return socket.close(4001, "Agent deleted");
+      live.listenerMessage(bot, socket, typeof message === "string" ? message : message.toString("utf8"));
+    },
+    close(socket: ListenerSocket) {
+      live.detachListener(socket.data.botId, socket);
+    },
+  };
+
   function purge(maxAgeMs = 30 * DAY_MS) {
     store.purge(now());
     // Calls ring for at most a minute, so audio is useless after a day.
@@ -486,5 +654,5 @@ export function createApp(options: AppOptions) {
     store.purgeAbandonedAccounts(now() - 7 * DAY_MS);
   }
 
-  return { handle, purge };
+  return { handle, purge, upgrade, websocket, tick: live.tick, live };
 }

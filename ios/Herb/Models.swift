@@ -12,13 +12,14 @@ struct Bot: Codable, Identifiable, Hashable {
 }
 
 enum CallStatus: String, Codable {
-    case ringing, answered, played, declined, missed, failed
+    case ringing, answered, played, ended, declined, missed, failed
 
     var label: String {
         switch self {
         case .ringing: "Ringing"
         case .answered: "Answered"
         case .played: "Played"
+        case .ended: "Ended"
         case .declined: "Declined"
         case .missed: "Missed"
         case .failed: "Failed"

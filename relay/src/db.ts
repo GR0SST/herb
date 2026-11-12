@@ -1,12 +1,14 @@
 import { Database } from "bun:sqlite";
 import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto";
 
-export type CallStatus = "ringing" | "answered" | "played" | "declined" | "missed" | "failed";
-const TERMINAL: readonly CallStatus[] = ["played", "declined", "missed", "failed"];
+export type CallStatus = "ringing" | "answered" | "played" | "ended" | "declined" | "missed" | "failed";
+const TERMINAL: readonly CallStatus[] = ["played", "ended", "declined", "missed", "failed"];
 const TRANSITIONS: Record<CallStatus, readonly CallStatus[]> = {
   ringing: ["answered", "declined", "missed", "failed"],
-  answered: ["played", "failed"],
+  // "played" ends a one-way call, "ended" a live one.
+  answered: ["played", "ended", "failed"],
   played: [],
+  ended: [],
   declined: [],
   missed: [],
   failed: [],
@@ -19,6 +21,9 @@ export interface Bot {
   chat_url: string | null;
   chat_key_env: string | null;
   chat_model: string | null;
+  live_instructions: string | null;
+  webhook_url: string | null;
+  webhook_secret: string | null;
 }
 
 export interface Device {
@@ -39,6 +44,9 @@ export interface Call {
   language: string | null;
   audio_mime: string | null;
   status: CallStatus;
+  live: number;
+  ended_reason: string | null;
+  duration_s: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -75,9 +83,9 @@ function newAccountKey() {
   return raw.match(/.{4}/g)!.join("-");
 }
 
-const BOT_COLUMNS = "id, account_id, name, chat_url, chat_key_env, chat_model";
+const BOT_COLUMNS = "id, account_id, name, chat_url, chat_key_env, chat_model, live_instructions, webhook_url, webhook_secret";
 const DEVICE_COLUMNS = "id, account_id, name, voip_token, environment, created_at";
-const CALL_SELECT = `SELECT c.id, c.bot_id, b.name AS bot_name, c.title, c.text, c.language, c.audio_mime, c.status, c.created_at, c.updated_at
+const CALL_SELECT = `SELECT c.id, c.bot_id, b.name AS bot_name, c.title, c.text, c.language, c.audio_mime, c.status, c.live, c.ended_reason, c.duration_s, c.created_at, c.updated_at
   FROM calls c JOIN bots b ON b.id = c.bot_id`;
 
 export class Store {
@@ -117,6 +125,20 @@ export class Store {
     this.db.run("CREATE INDEX IF NOT EXISTS calls_created ON calls(created_at DESC)");
     const botColumns = this.db.query<{ name: string }, []>("PRAGMA table_info(bots)").all();
     if (!botColumns.some((c) => c.name === "system")) this.db.run("ALTER TABLE bots ADD COLUMN system INTEGER NOT NULL DEFAULT 0");
+    for (const column of ["live_instructions", "webhook_url", "webhook_secret"]) {
+      if (!botColumns.some((c) => c.name === column)) this.db.run(`ALTER TABLE bots ADD COLUMN ${column} TEXT`);
+    }
+    const callColumns = this.db.query<{ name: string }, []>("PRAGMA table_info(calls)").all();
+    if (!callColumns.some((c) => c.name === "live")) {
+      this.db.run("ALTER TABLE calls ADD COLUMN live INTEGER NOT NULL DEFAULT 0");
+      this.db.run("ALTER TABLE calls ADD COLUMN ended_reason TEXT");
+      this.db.run("ALTER TABLE calls ADD COLUMN duration_s INTEGER");
+    }
+    // Paid live call time left, in seconds.
+    this.db.run(`CREATE TABLE IF NOT EXISTS live_balance (
+      account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+      seconds INTEGER NOT NULL
+    )`);
     this.db.run(`CREATE TABLE IF NOT EXISTS oauth_clients (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, redirect_uris TEXT NOT NULL, created_at INTEGER NOT NULL
     )`);
@@ -262,6 +284,15 @@ export class Store {
     this.db.query("UPDATE bots SET chat_url = ?, chat_key_env = ?, chat_model = ? WHERE id = ?").run(chat.url, chat.keyEnv, chat.model, id);
   }
 
+  /** Saves the voice agent's instructions and webhook. A new webhook URL gets a new secret, returned once. */
+  setBotLive(id: string, live: { instructions?: string | null; webhookUrl?: string | null }) {
+    if (live.instructions !== undefined) this.db.query("UPDATE bots SET live_instructions = ? WHERE id = ?").run(live.instructions, id);
+    if (live.webhookUrl === undefined) return null;
+    const secret = live.webhookUrl ? `whsec_${randomBytes(24).toString("base64url")}` : null;
+    this.db.query("UPDATE bots SET webhook_url = ?, webhook_secret = ? WHERE id = ?").run(live.webhookUrl, secret, id);
+    return secret;
+  }
+
   /** Returns the removed agent's call ids so their audio can be deleted. */
   deleteBot(id: string) {
     const calls = this.db.query<{ id: string }, [string]>("SELECT id FROM calls WHERE bot_id = ?").all(id);
@@ -300,16 +331,19 @@ export class Store {
     audioMime?: string;
     audioBytes?: number;
     idempotencyKey?: string;
+    live?: boolean;
+    /** A call started from the phone is answered from the start. */
+    status?: "ringing" | "answered";
     now: number;
   }) {
     const id = randomUUID();
     this.db
       .query(
-        `INSERT INTO calls (id, bot_id, title, text, language, audio_mime, audio_bytes, status, idempotency_key, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'ringing', ?, ?, ?)`,
+        `INSERT INTO calls (id, bot_id, title, text, language, audio_mime, audio_bytes, status, idempotency_key, live, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(id, input.botId, input.title ?? null, input.text ?? null, input.language ?? null, input.audioMime ?? null,
-        input.audioBytes ?? 0, input.idempotencyKey ?? null, input.now, input.now);
+        input.audioBytes ?? 0, input.status ?? "ringing", input.idempotencyKey ?? null, input.live ? 1 : 0, input.now, input.now);
     return this.call(id)!;
   }
 
@@ -340,6 +374,26 @@ export class Store {
     if (!TRANSITIONS[current.status].includes(next)) return false;
     this.db.query("UPDATE calls SET status = ?, updated_at = ? WHERE id = ?").run(next, now, id);
     return true;
+  }
+
+  endLiveCall(id: string, reason: string, durationS: number, now: number) {
+    if (!this.transition(id, reason === "failed" ? "failed" : "ended", now)) return false;
+    this.db.query("UPDATE calls SET ended_reason = ?, duration_s = ? WHERE id = ?").run(reason, durationS, id);
+    return true;
+  }
+
+  // Live call minutes
+
+  liveSeconds(accountId: string) {
+    return this.db.query<{ seconds: number }, [string]>("SELECT seconds FROM live_balance WHERE account_id = ?").get(accountId)?.seconds ?? 0;
+  }
+
+  /** Adds or, with a negative number, spends seconds. The balance never goes below zero. */
+  addLiveSeconds(accountId: string, delta: number) {
+    this.db
+      .query(`INSERT INTO live_balance (account_id, seconds) VALUES (?, max(0, ?))
+              ON CONFLICT (account_id) DO UPDATE SET seconds = max(0, seconds + ?)`)
+      .run(accountId, Math.round(delta), Math.round(delta));
   }
 
   expireRinging(now: number) {

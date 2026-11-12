@@ -33,8 +33,13 @@ const app = createApp({
   oauth,
   publicUrl: HERB_PUBLIC_URL,
   openRegistration: HERB_OPEN_REGISTRATION !== "false",
+  // The speech model is connected in a later step: until then live calls report unavailable.
+  voice: null,
+  billing: process.env.HERB_BILLING === "true",
+  allowPrivateWebhooks: process.env.HERB_ALLOW_PRIVATE_WEBHOOKS === "true",
 });
 setInterval(() => app.purge(), 6 * 60 * 60 * 1000);
+setInterval(() => app.tick(), 2_000);
 
 const server = Bun.serve({
   hostname: process.env.HOST ?? "127.0.0.1",
@@ -42,6 +47,10 @@ const server = Bun.serve({
   maxRequestBodySize: MAX_BODY_BYTES,
   // A chat reply can take longer than the default 10 seconds.
   idleTimeout: 255,
-  fetch: (request) => app.handle(request),
+  fetch: (request, server) => {
+    const upgraded = app.upgrade(request, server);
+    return upgraded === null ? app.handle(request) : upgraded;
+  },
+  websocket: app.websocket,
 });
 console.log(`Herb relay: ${server.url}`);

@@ -1,6 +1,6 @@
 # Live calls
 
-> **Draft.** This is the planned protocol for full duplex calls. Nothing here is implemented yet, and names may change.
+> **Draft.** The server side of this protocol is implemented. The speech model and the iPhone app are not connected yet, so live calls return `503 live_unavailable` for now. Names may still change.
 
 In a live call you and a voice agent talk at the same time and can interrupt each other. The voice agent runs in Herb. It is not your main agent: it is a front that talks to you and asks your main agent (Codex, Claude Code, OpenClaw, a script, anything) through **events**.
 
@@ -35,6 +35,8 @@ curl https://herb.grosst.cc/v1/call \
 
 The phone rings as usual. When you answer, the voice agent opens with `text`, then the call goes on as a conversation. Herb sends `call.started` with `direction: "outbound"`. If the call is declined or missed, nothing more is sent.
 
+A live call has `"live": true`. It ends with status `ended` (or `failed`) and gets `ended_reason` and `duration_s`. An account has one live call at a time: a second one returns `409 call_in_progress`.
+
 ## Receiving events
 
 An agent gets events in one of two ways. Both carry the same JSON.
@@ -46,7 +48,9 @@ An agent gets events in one of two ways. Both carry the same JSON.
 
 If a listener is connected, Herb uses it. Otherwise it uses the webhook. With neither, the voice agent tells you your main agent is offline and talks using the context it has.
 
-Only one listener per agent is active: a new connection replaces the old one.
+Only one listener per agent is active: a new connection replaces the old one, which is closed with code 4000.
+
+Errors from actions sent over the listener come back as `{"type": "error", "call_id": "...", "error": {"code": "...", "message": "..."}}`.
 
 ### Event
 
@@ -182,6 +186,8 @@ Herb-Signature: v1=<hex HMAC-SHA256 of "<timestamp>.<raw body>" with the agent's
 
 Check the signature and reject timestamps more than 5 minutes off. The secret is shown once when you set the webhook URL.
 
+Webhooks must use `https://` and a public address. Redirects are not followed.
+
 `call.started` and `agent.ask` are not retried: by the time a retry arrived, the moment would be gone. `call.ended` is retried after 10 s, 1 min, 10 min and 1 h until a 2xx. Use `Herb-Event-Id` to skip duplicates.
 
 ## Example handler
@@ -218,12 +224,33 @@ Starting a live call without minutes returns `402 no_minutes`. One-way calls sta
 
 The subscription belongs to your Apple ID, not to your key. If you sign in with another key on the phone, the subscription and remaining minutes move to the new account.
 
-**Self-hosted:** set `OPENAI_API_KEY` on your server and live calls work with no subscription and no minute limit. You pay OpenAI directly.
+**Self-hosted:** minutes are off unless you set `HERB_BILLING=true`, so live calls have no limit. You pay the speech model provider directly. With billing on, add minutes with `bun run cli minutes <account-key> <minutes>`. To send webhooks to your own network, set `HERB_ALLOW_PRIVATE_WEBHOOKS=true`.
 
 ## Agent settings
 
-New fields on an agent, set in the app or on the website:
+Set in the app, on the website, or with a phone token:
 
-- **Instructions:** how the voice agent behaves in every call, up to 4,000 characters.
-- **Webhook URL** and its secret.
-- **Voice.**
+```sh
+curl -X PATCH https://herb.grosst.cc/v1/bots/<agent id> \
+  -H "Authorization: Bearer $PHONE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"instructions":"Be brief.","webhook_url":"https://example.com/herb"}'
+```
+
+- `instructions`: how the voice agent behaves in every call, up to 4,000 characters. `null` clears.
+- `webhook_url`: a new URL returns a new `webhook_secret`, shown only in this response. `null` removes the webhook.
+
+The agent list shows `live.webhook_url`, `live.instructions` and whether a listener is connected (`live.listener`).
+
+## Phone API
+
+For the iPhone app, with a phone token:
+
+| Request | Effect |
+|---|---|
+| `POST /v1/live` `{"bot_id": "..."}` | Call an agent. Returns the call and the speech model connection. |
+| `POST /v1/calls/{id}/live` | Join an agent's live call after answering it. |
+| `POST /v1/calls/{id}/end` | Hang up. |
+| `GET /v1/status` | `live.available`, `live.billing`, `live.seconds_left`. |
+
+The VoIP push for a live call has `"live": true`.

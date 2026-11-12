@@ -44,7 +44,7 @@ curl https://herb.grosst.cc/v1/call \
 
 Instead of `text` you can send `audio_base64` and `audio_mime` (mp3, m4a, aac or wav, up to 10 MB). Status: `GET /v1/calls/<id>`.
 
-Statuses: `ringing`, `answered`, `played`, `declined`, `missed`, `failed`. `played` means the message finished playing, not that it was heard.
+Statuses: `ringing`, `answered`, `played`, `ended`, `declined`, `missed`, `failed`. `played` means the message finished playing, not that it was heard. `ended` is for [live calls](docs/live-calls.md).
 
 Limits: 6 calls per minute per agent, 200 calls per day per account, 50 agents per account. Uploaded audio is kept for a day, call history for 30 days.
 

@@ -40,8 +40,8 @@ export function signApnsJwt(key: KeyObject, keyId: string, teamId: string, nowMs
   return `${head}.${body}.${b64(signature)}`;
 }
 
-export function voipPayload(call: Pick<Call, "id" | "bot_id" | "bot_name" | "title">) {
-  return { aps: {}, call_id: call.id, bot_id: call.bot_id, bot_name: call.bot_name, title: call.title };
+export function voipPayload(call: Pick<Call, "id" | "bot_id" | "bot_name" | "title" | "live">) {
+  return { aps: {}, call_id: call.id, bot_id: call.bot_id, bot_name: call.bot_name, title: call.title, live: call.live === 1 };
 }
 
 export class ApnsSender implements PushSender {

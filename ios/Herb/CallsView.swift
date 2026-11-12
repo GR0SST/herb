@@ -35,7 +35,7 @@ struct CallRow: View {
 
     private var icon: (name: String, color: Color) {
         switch record.status {
-        case .played, .answered: ("phone.arrow.down.left", .green)
+        case .played, .answered, .ended: ("phone.arrow.down.left", .green)
         case .ringing: ("phone.badge.waveform", .accentColor)
         case .declined: ("phone.down", .secondary)
         case .missed, .failed: ("phone.arrow.down.left", .red)

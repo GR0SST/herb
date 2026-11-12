@@ -7,6 +7,7 @@ const USAGE = `Usage:
   bun run cli account add                  Create an account and print its key
   bun run cli agents <account-key>         List agents with their ids
   bun run cli chat <agent-id> --chat-url URL [--chat-model MODEL] [--chat-key-env ENV_NAME]
+  bun run cli minutes <account-key> [<minutes>]   Show or add live call minutes (negative to take away)
 
 Chat reaches your own services, so it is set up only here.`;
 
@@ -40,6 +41,14 @@ if (command === "account" && argument === "add") {
   if (!url || !/^https?:\/\//.test(url)) fail("--chat-url must start with http:// or https://");
   store.setBotChat(bot.id, { url, model: values["chat-model"] ?? null, keyEnv: values["chat-key-env"] ?? null });
   console.log("Chat enabled");
+} else if (command === "minutes") {
+  const accountId = store.accountIdByKey(argument ?? fail()) ?? fail("Account not found");
+  const minutes = positionals[2];
+  if (minutes !== undefined) {
+    if (!/^-?\d+$/.test(minutes)) fail("Minutes must be a whole number");
+    store.addLiveSeconds(accountId, Number(minutes) * 60);
+  }
+  console.log(`Live minutes left: ${(store.liveSeconds(accountId) / 60).toFixed(1)}`);
 } else {
   fail();
 }
