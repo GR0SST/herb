@@ -329,7 +329,7 @@ Errors are `{"error":{"code","message"}}`.
 | Code | Meaning |
 |---|---|
 | `401 unauthorized` | Missing or wrong token. |
-| `402 no_minutes` | No live call minutes left. |
+| `402 no_minutes` | No live call minutes left. Tell the user to subscribe in the Herb app under Settings → Live Calls, or send a one-way call instead. |
 | `409 call_in_progress` | The account already has a live call. |
 | `409 call_ended` | The call is not live any more. |
 | `404 no_live_call` | No live call right now. |

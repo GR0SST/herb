@@ -50,6 +50,8 @@ final class CallCenter: NSObject {
     @ObservationIgnored var api: () -> API? = { nil }
     @ObservationIgnored var onVoipToken: (String) -> Void = { _ in }
     @ObservationIgnored var onCallFinished: () -> Void = {}
+    /// The server turned a live call down for lack of minutes.
+    @ObservationIgnored var onNoMinutes: () -> Void = {}
 
     @ObservationIgnored private let provider: CXProvider
     @ObservationIgnored private let controller = CXCallController()
@@ -283,6 +285,10 @@ final class CallCenter: NSObject {
                 try? await Task.sleep(for: .seconds(8))
                 self?.agentReady(id)
             }
+        } catch APIError.noMinutes {
+            connection.close()
+            finishAfterFailure(id, "No minutes left")
+            onNoMinutes()
         } catch {
             connection.close()
             finishAfterFailure(id, error.localizedDescription)

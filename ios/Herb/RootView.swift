@@ -21,6 +21,13 @@ struct RootView: View {
         )) { _ in
             ActiveCallView()
         }
+        // Waits for the call screen to close, since a sheet cannot open over it.
+        .sheet(isPresented: Binding(
+            get: { model.showingPlans && model.callCenter.active == nil && model.connection != nil },
+            set: { model.showingPlans = $0 }
+        )) {
+            PlansView()
+        }
         .task {
             // Ask up front: there is no way to answer on the lock screen during a call.
             if AVAudioApplication.shared.recordPermission == .undetermined {
@@ -146,7 +153,7 @@ struct CallAgentButton: View {
 
     var body: some View {
         Button {
-            if bot.canTakeCalls { model.callCenter.callAgent(bot) } else { editing = true }
+            if bot.canTakeCalls { model.callAgent(bot) } else { editing = true }
         } label: {
             Image(systemName: "phone.fill")
                 .font(.system(size: size * 0.42, weight: .semibold))

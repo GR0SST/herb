@@ -31,7 +31,7 @@ The voice agent drops an unanswered question after 5 minutes, and nothing can re
 | `live_call_status` | See the current call: which agent was called, open questions, recent transcript. Use it when you lack context. |
 | `live_call_context` | Give the voice agent facts without reading them out. |
 | `live_call_hang_up` | End the call, only when the user asked or the conversation is clearly over. The voice agent says goodbye. |
-| `phone_call` with `live: true` | Call the user for a conversation. `text` is the voice agent's opening line. Only when the user asked or set up the rule in advance. |
+| `phone_call` with `live: true` | Call the user for a conversation. `text` is the voice agent's opening line. Only when the user asked or set up the rule in advance. If it returns `no_minutes`, tell the user in chat that conversation calls need a subscription in the Herb app (Settings → Live Calls), and offer a one-way call. |
 
 ## Setting up the voice agent
 

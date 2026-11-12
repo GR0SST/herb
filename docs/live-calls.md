@@ -291,7 +291,7 @@ Live calls on the hosted server are paid. An account has one of these:
 - **Bonus minutes**, gifted by the server owner or given to new accounts (`HERB_FREE_MINUTES`). They never expire and are spent after the subscription's.
 - **Unlimited**, set by the server owner for themselves and friends.
 
-Minutes are counted on the server from answer to hang-up. When they run out, the voice agent says so and the call ends with `no_minutes`. Starting a live call without minutes returns `402 no_minutes`. One-way calls stay free.
+Minutes are counted on the server from answer to hang-up. When they run out, the voice agent says so and the call ends with `no_minutes`. Starting a live call without minutes returns `402 no_minutes`, with a message that tells the agent to point the user to Settings → Live Calls in the app. The app shows its plans when the user calls an agent without minutes. One-way calls stay free.
 
 `GET /v1/status` returns the plan under `live`: `unlimited`, `seconds_left` (`null` for no limit), `bonus_seconds`, `subscription` and the `products` on sale.
 

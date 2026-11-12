@@ -19,7 +19,7 @@ export const MCP_TOOLS = [
         idempotency_key: { type: "string", description: "One key per event, so a retry does not ring twice." },
         live: {
           type: "boolean",
-          description: "true for a conversation instead of a message. Only where live calls are enabled for the user.",
+          description: "true for a conversation instead of a message. Only where live calls are enabled for the user. Conversations need minutes from a Herb subscription: without them the call is rejected with no_minutes, so tell the user they can subscribe in the Herb app under Settings → Live Calls.",
         },
         context: {
           type: "string",

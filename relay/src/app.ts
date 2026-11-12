@@ -224,7 +224,13 @@ export function createApp(options: AppOptions) {
       if (audioB64) return reject("invalid_content", "A live call takes text, not audio");
       if (liveContext.length > LIVE_LIMITS.context) return reject("context_too_long", `Context is longer than ${LIVE_LIMITS.context} characters`);
       const blocked = live.canStart(bot.account_id);
-      if (blocked === "no_minutes") return reject("no_minutes", "No live call minutes left", 402);
+      if (blocked === "no_minutes") {
+        return reject(
+          "no_minutes",
+          "The user has no live call minutes. Tell them that a conversation call needs a Herb subscription, which they can buy in the Herb iPhone app under Settings → Live Calls. Until then you can call with a one-way message instead: the same call without live.",
+          402,
+        );
+      }
     }
 
     // Text and audio are optional: a call without a message just rings.

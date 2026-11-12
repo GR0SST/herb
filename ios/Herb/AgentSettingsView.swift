@@ -29,7 +29,7 @@ struct AgentContactCard: View {
             Text(bot.name).font(.title2.weight(.semibold))
             if model.status?.live?.available == true {
                 Button {
-                    if bot.canTakeCalls { model.callCenter.callAgent(bot) } else { editing = true }
+                    if bot.canTakeCalls { model.callAgent(bot) } else { editing = true }
                 } label: {
                     Label("Call", systemImage: "phone.fill")
                         .font(.headline)

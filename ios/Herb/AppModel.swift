@@ -14,6 +14,8 @@ final class AppModel {
     /// Server for the sign-in screen. Can be replaced with your own.
     var signInServer = AppModel.defaultServer
     var errorMessage: String?
+    /// The plans sheet, shown when a live call needs minutes.
+    var showingPlans = false
 
     let callCenter = CallCenter()
     let purchases = Purchases()
@@ -45,6 +47,7 @@ final class AppModel {
         callCenter.onCallFinished = { [weak self] in
             Task { await self?.refresh() }
         }
+        callCenter.onNoMinutes = { [weak self] in self?.showingPlans = true }
         callCenter.start()
         #if DEBUG
         signInForScreenshots()
@@ -179,6 +182,21 @@ final class AppModel {
             forget()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Live calls are paid and none are left: a call would only be turned down.
+    var needsPlan: Bool {
+        guard let live = status?.live, live.billing, live.unlimited != true else { return false }
+        return (live.secondsLeft ?? 1) <= 0
+    }
+
+    /// Calls an agent, or shows the plans first when there are no minutes.
+    func callAgent(_ bot: Bot) {
+        if needsPlan {
+            showingPlans = true
+        } else {
+            callCenter.callAgent(bot)
         }
     }
 

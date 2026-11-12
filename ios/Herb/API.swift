@@ -3,10 +3,13 @@ import Foundation
 enum APIError: LocalizedError {
     case message(String)
     case unauthorized
+    /// A live call without minutes left: the app shows its plans.
+    case noMinutes
 
     var errorDescription: String? {
         switch self {
         case .message(let text): text
+        case .noMinutes: "No live call minutes left"
         case .unauthorized: "This account no longer exists on the server"
         }
     }
@@ -36,6 +39,7 @@ struct API {
         guard let http = response as? HTTPURLResponse else { throw APIError.message("No response from the server") }
         guard (200..<300).contains(http.statusCode) else {
             if http.statusCode == 401 { throw APIError.unauthorized }
+            if http.statusCode == 402 { throw APIError.noMinutes }
             if let parsed = try? JSONDecoder().decode(ErrorBody.self, from: data) {
                 throw APIError.message(parsed.error.message)
             }
