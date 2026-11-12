@@ -11,7 +11,7 @@
   <nav class="nav" aria-label="Main"><a class="brand title-3" href="/"><img src="/icon.svg" alt="" width="24" height="24">Herb</a></nav>
   <main class="prose">
     <h1 class="heading-3">Privacy</h1>
-    <p class="caption-2 muted">Updated November 5, 2026</p>
+    <p class="caption-2 muted">Updated November 12, 2026</p>
     <p class="body-3">This covers the hosted server at herb.grosst.cc. If you run your own server, you control the data.</p>
     <h2 class="heading-6">What we store</h2>
     <ul class="body-3">
@@ -20,13 +20,19 @@
       <li>A push token for each phone, used only to ring it.</li>
       <li>For each call: the agent, title, text, language, status and time.</li>
       <li>Audio files an agent uploads for a call.</li>
+      <li>For live calls: the text transcript of the conversation, its length, and the context the calling agent sent.</li>
+      <li>For each agent: the voice agent's instructions and the webhook address you set.</li>
+      <li>For a subscription: the App Store transaction ids, product, period and minutes used. Apple handles payment; we never see your payment details or Apple ID.</li>
     </ul>
     <h2 class="heading-6">What we do not collect</h2>
-    <p class="body-3">We do not ask for your name or email. Herb never records your voice: calls are one way, and speech is generated on your phone. There are no analytics or advertising trackers on this site.</p>
+    <p class="body-3">We do not ask for your name or email. In one-way calls, speech is generated on your phone and Herb does not listen. In live calls, Herb uses the microphone only while the call is on, and does not store the audio. There are no analytics or advertising trackers on this site.</p>
     <h2 class="heading-6">How long we keep it</h2>
-    <p class="body-3">Call history is deleted after 30 days and uploaded audio after one day. Accounts with no phones and no agents are deleted after 7 days. Deleting your account removes everything at once.</p>
+    <p class="body-3">Call history, including live call transcripts, is deleted after 30 days and uploaded audio after one day. Accounts with no phones and no agents are deleted after 7 days. Deleting your account removes everything at once.</p>
     <h2 class="heading-6">Who else handles data</h2>
-    <p class="body-3">Apple delivers the push that rings your phone. The push holds the call id, agent name and title, not the message text. Cloudflare sits in front of the server and processes requests, including your IP address. The server keeps short term web logs.</p>
+    <p class="body-3">Apple delivers the push that rings your phone. The push holds the call id, agent name and title, not the message text. Apple also processes subscription payments.</p>
+    <p class="body-3">In live calls, your voice goes in real time to OpenAI, which runs the voice agent and returns its speech. OpenAI processes the audio under its <a href="https://openai.com/policies/api-data-usage-policies">API data policy</a>; Herb asks it not to store the session.</p>
+    <p class="body-3">Live call events, including the transcript and your questions, go to the webhook or listener you set up for that agent, such as your own computer or a service you chose. That service handles them under its own terms.</p>
+    <p class="body-3">Cloudflare sits in front of the server and processes requests, including your IP address. The server keeps short term web logs.</p>
     <h2 class="heading-6">Cookies</h2>
     <p class="body-3">We use only the cookies needed to keep you signed in and to protect the sign in form. This site also keeps your account key in your browser's local storage so you can copy it later. Signing out or deleting your account removes it.</p>
     <h2 class="heading-6">Questions</h2>

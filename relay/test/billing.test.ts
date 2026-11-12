@@ -10,7 +10,8 @@ import { Store } from "../src/db";
 import type { VoiceEngine } from "../src/live";
 
 const DAY = 24 * 60 * 60 * 1000;
-const PRODUCT = "cc.grosst.herb.live.monthly";
+const PRODUCT = "cc.grosst.herb.live.standard";
+const PRO = "cc.grosst.herb.live.pro";
 const BUNDLE = "cc.grosst.herb";
 
 // A certificate chain shaped like Apple's: root, intermediate, leaf. Real Apple data needs Apple's root.
@@ -74,7 +75,7 @@ function makeApp(extra: Partial<Parameters<typeof createApp>[0]> = {}) {
     now: () => clock,
     voice,
     billing: true,
-    products: { [PRODUCT]: 100 },
+    products: { [PRODUCT]: 100, [PRO]: 300 },
     bundleId: BUNDLE,
     sandboxMinutes: 5,
     appleRoots: [chain.root],
@@ -158,6 +159,15 @@ describe("subscription", () => {
     clock += 30 * DAY;
     expect((await notify(transaction({ transactionId: "t2", purchaseDate: clock, expiresDate: clock + 30 * DAY }))).status).toBe(200);
     expect(await live()).toMatchObject({ seconds_left: 6000, subscription: { active: true, seconds_used: 0 } });
+  });
+
+  test("an upgrade starts a new period with the bigger plan's minutes", async () => {
+    await buy(transaction());
+    store.spendSubscription("o1", 3000);
+    clock += 1000;
+    await buy(transaction({ transactionId: "t2", productId: PRO, purchaseDate: clock }));
+    expect(await live()).toMatchObject({ seconds_left: 18_000, subscription: { seconds_used: 0, seconds_total: 18_000 } });
+    expect(store.subscription("o1")!.product_id).toBe(PRO);
   });
 
   test("expiry and refunds stop the minutes", async () => {

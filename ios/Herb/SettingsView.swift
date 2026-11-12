@@ -215,15 +215,28 @@ private struct LiveCallsSection: View {
                 LabeledContent("Bonus Minutes", value: Self.minutes(bonus))
             }
             if live.billing && live.unlimited != true {
-                if live.subscription?.active != true {
-                    ForEach(purchases.products, id: \.id) { product in
-                        Button {
-                            Task { await purchases.buy(product) }
-                        } label: {
-                            LabeledContent(product.displayName, value: "\(product.displayPrice) / \(period(product))")
+                // All plans stay visible: buying another one in the group is an upgrade or downgrade through Apple.
+                ForEach(purchases.products, id: \.id) { product in
+                    let current = live.subscription?.active == true && live.subscription?.productID == product.id
+                    Button {
+                        Task { await purchases.buy(product) }
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(product.displayName).foregroundStyle(.primary)
+                                if let minutes = live.products?.first(where: { $0.id == product.id })?.minutes {
+                                    Text("\(minutes) min / \(period(product))").font(.footnote).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if current {
+                                Text("Current").foregroundStyle(.secondary)
+                            } else {
+                                Text("\(product.displayPrice) / \(period(product))")
+                            }
                         }
-                        .disabled(purchases.isWorking)
                     }
+                    .disabled(purchases.isWorking || current)
                 }
                 if live.subscription != nil {
                     Button("Manage Subscription") { managing = true }
@@ -238,7 +251,15 @@ private struct LiveCallsSection: View {
             Text("Live Calls")
         } footer: {
             if live.billing && live.unlimited != true {
-                Text("Minutes renew each period and do not carry over. The subscription belongs to your Apple ID and moves with you to another account key.")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Minutes renew each period and do not carry over. The subscription renews automatically at the price shown until you cancel it at least 24 hours before the period ends, in Manage Subscription. It belongs to your Apple ID and moves with you to another account key.")
+                    if let base = model.connection?.baseURL {
+                        HStack(spacing: 16) {
+                            Link("Terms of Use", destination: base.appending(path: "terms"))
+                            Link("Privacy Policy", destination: base.appending(path: "privacy"))
+                        }
+                    }
+                }
             }
         }
         .manageSubscriptionsSheet(isPresented: $managing)

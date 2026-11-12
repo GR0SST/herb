@@ -101,6 +101,8 @@ export function createGptLive(options: GptLiveOptions): VoiceEngine {
             instructions: buildInstructions(setup),
             audio: { output: { voice: options.voice ?? "marin" } },
             delegation: { type: "client" },
+            // Our privacy policy says OpenAI is asked not to keep the session.
+            store: false,
             triggers: [{ type: "decisions", event_type: "session.output_transcript.delta", decisions: { questions: [CALL_FINISHED] } }],
             client: {
               data_channel: {

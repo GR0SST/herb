@@ -83,6 +83,7 @@ describe("session setup", () => {
     const session = request!.body.session;
     expect(session.model).toBe("gpt-live-1");
     expect(session.delegation).toEqual({ type: "client" });
+    expect(session.store).toBe(false);
     expect(session.instructions).toContain("Billing thread");
     expect(request!.headers.get("openai-safety-identifier")).toHaveLength(64);
     expect(JSON.stringify(request!.body)).not.toContain("acc-1");

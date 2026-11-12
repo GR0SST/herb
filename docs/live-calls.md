@@ -300,7 +300,7 @@ The phone sends signed App Store transactions to `POST /v1/billing/transactions`
 **Self-hosted:** set `OPENAI_API_KEY` to turn live calls on. Without `HERB_BILLING=true` every account is unlimited and you pay the speech model provider directly. With billing on, set the products and manage accounts with the CLI:
 
 ```sh
-HERB_PRODUCTS=cc.grosst.herb.live.monthly=100   # product id = minutes per period
+HERB_PRODUCTS=cc.grosst.herb.live.lite=30,cc.grosst.herb.live.standard=100   # product id = minutes per period
 bun run cli unlimited <account> on               # no counting for this account
 bun run cli minutes <account> 30                 # gift 30 minutes
 bun run cli live <account>                       # show the plan
