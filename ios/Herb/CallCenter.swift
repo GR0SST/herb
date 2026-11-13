@@ -103,6 +103,17 @@ final class CallCenter: NSObject {
         LiveConnection.useCallKitAudio(useCallKit)
         registry.delegate = self
         registry.desiredPushTypes = [.voIP]
+        #if DEBUG
+        // App Store screenshots of a conversation: -HerbDemoLiveCall "Claude Code" -HerbDemoLiveTitle "Center a div"
+        if let name = UserDefaults.standard.string(forKey: "HerbDemoLiveCall") {
+            let id = UUID()
+            known.insert(id)
+            var session = CallSession(id: id, botName: name, title: UserDefaults.standard.string(forKey: "HerbDemoLiveTitle"), live: true)
+            session.phase = .live
+            session.connectedAt = Date() - UserDefaults.standard.double(forKey: "HerbDemoElapsed")
+            sessions[id] = session
+        }
+        #endif
     }
 
     /// A call found by polling while the app is open.
