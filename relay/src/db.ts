@@ -133,6 +133,11 @@ export class Store {
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
       expires_at INTEGER NOT NULL
     )`);
+    this.db.run(`CREATE TABLE IF NOT EXISTS setup_links (
+      code_hash TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      expires_at INTEGER NOT NULL
+    )`);
     this.db.run(`CREATE TABLE IF NOT EXISTS bots (
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -262,6 +267,22 @@ export class Store {
 
   deleteSession(token: string) {
     this.db.query("DELETE FROM sessions WHERE token_hash = ?").run(hashToken(token));
+  }
+
+  // Setup links: the phone opens the website on a computer, already signed in.
+
+  createSetupLink(accountId: string, now: number, ttlMs: number) {
+    const code = randomBytes(18).toString("base64url");
+    this.db.query("INSERT INTO setup_links (code_hash, account_id, expires_at) VALUES (?, ?, ?)").run(hashToken(code), accountId, now + ttlMs);
+    return code;
+  }
+
+  /** Works once: the link is gone after this. */
+  takeSetupLink(code: string, now: number) {
+    const row = this.db
+      .query<{ account_id: string }, [string, number]>("DELETE FROM setup_links WHERE code_hash = ? AND expires_at > ? RETURNING account_id")
+      .get(hashToken(code), now);
+    return row?.account_id ?? null;
   }
 
   // Phones
@@ -620,6 +641,7 @@ export class Store {
   purge(now: number) {
     this.db.query("DELETE FROM oauth_grants WHERE refresh_expires < ?").run(now);
     this.db.query("DELETE FROM sessions WHERE expires_at < ?").run(now);
+    this.db.query("DELETE FROM setup_links WHERE expires_at < ?").run(now);
     // The client registered but never finished signing in.
     this.db.query("DELETE FROM oauth_clients WHERE created_at < ? AND id NOT IN (SELECT client_id FROM oauth_grants)").run(now - 24 * 60 * 60 * 1000);
   }

@@ -42,7 +42,7 @@ const random = () => randomBytes(32).toString("base64url");
 const sha256 = (value: string) => createHash("sha256").update(value).digest();
 const hashToken = (token: string) => sha256(token).toString("hex");
 
-const escapeHtml = (value: string) =>
+export const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 const NO_STORE = { "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" };
@@ -85,8 +85,8 @@ function redirectMatches(registered: string[], candidate: string) {
   });
 }
 
-function page(title: string, body: string, status = 200, headers: Record<string, string> = {}, cookies: string[] = []) {
-  const html = `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
+export function page(title: string, body: string, status = 200, headers: Record<string, string> = {}, cookies: string[] = []) {
+  const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
 <style>
 :root{color-scheme:light dark;--bg:#f5f4f8;--card:#fff;--text:#1c1a22;--muted:#6b6776;--line:#d9d6e0;--accent:#7c3aed}
 @media (prefers-color-scheme:dark){:root{--bg:#141318;--card:#1f1d25;--text:#f2f0f6;--muted:#a5a1b0;--line:#3a3743;--accent:#a78bfa}}

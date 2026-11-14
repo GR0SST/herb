@@ -6,10 +6,13 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     // Debug builds can open on a tab for App Store screenshots: -HerbDemoTab 1
     @State private var tab = UserDefaults.standard.integer(forKey: "HerbDemoTab")
+    @AppStorage(OnboardingView.doneKey) private var onboarded = false
 
     var body: some View {
         Group {
-            if model.connection == nil {
+            if model.connection == nil && !onboarded {
+                OnboardingView { withAnimation { onboarded = true } }
+            } else if model.connection == nil {
                 WelcomeView()
             } else {
                 signedIn
@@ -28,8 +31,10 @@ struct RootView: View {
         )) {
             PlansView()
         }
-        .task {
+        .task(id: onboarded || model.connection != nil) {
             // Ask up front: there is no way to answer on the lock screen during a call.
+            // The onboarding asks with its own explanation, so wait until it is over.
+            guard onboarded || model.connection != nil else { return }
             if AVAudioApplication.shared.recordPermission == .undetermined {
                 _ = await AVAudioApplication.requestRecordPermission()
             }
@@ -82,13 +87,7 @@ struct AgentsView: View {
             }
             .overlay {
                 if model.bots.isEmpty && model.errorMessage == nil {
-                    ContentUnavailableView {
-                        Label("No Agents", systemImage: "person.crop.circle.badge.plus")
-                    } actions: {
-                        Button("Connect Agent") { addingAgent = true }
-                            .buttonStyle(.borderedProminent)
-                            .foregroundStyle(Color(.systemBackground))
-                    }
+                    NoAgentsView { addingAgent = true }
                 }
             }
             .navigationTitle("Agents")
@@ -109,6 +108,8 @@ struct AgentsView: View {
             }
             .refreshable { await model.refresh() }
             .sheet(isPresented: $addingAgent) { ConnectAgentView() }
+            .onAppear(perform: openGuideAfterSignUp)
+            .onChange(of: model.showConnectGuide) { openGuideAfterSignUp() }
             .confirmationDialog(
                 "Remove \(pendingDelete?.name ?? "agent")?",
                 isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -121,6 +122,58 @@ struct AgentsView: View {
                 }
             } message: {
                 Text("It will no longer be able to call you. Its call history is deleted.")
+            }
+        }
+    }
+}
+
+extension AgentsView {
+    private func openGuideAfterSignUp() {
+        guard model.showConnectGuide else { return }
+        model.showConnectGuide = false
+        addingAgent = true
+    }
+}
+
+/// Explains what to do first, for anyone who skipped the onboarding.
+private struct NoAgentsView: View {
+    @Environment(AppModel.self) private var model
+    let connect: () -> Void
+    @State private var testState: TestState = .idle
+
+    private enum TestState: Equatable {
+        case idle, calling, sent
+        case failed(String)
+    }
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("Connect Your First Agent", systemImage: "phone.arrow.down.left")
+        } description: {
+            Text("Add Herb to ChatGPT, Claude, Codex or another agent, and it can call this iPhone when a task is done or something needs you.")
+        } actions: {
+            Button("Connect Agent", action: connect)
+                .buttonStyle(.borderedProminent)
+                .foregroundStyle(Color(.systemBackground))
+            Button(testState == .sent ? "Calling…" : "Try a Test Call") { testCall() }
+                .disabled(testState == .calling || testState == .sent)
+            if case .failed(let message) = testState {
+                Text(message).font(.footnote).foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func testCall() {
+        guard let api = model.api else { return }
+        testState = .calling
+        Task {
+            do {
+                try await api.testCall(text: "Hi, this is Herb. This is how your agent will call you when it needs you.")
+                testState = .sent
+                try? await Task.sleep(for: .seconds(8))
+                testState = .idle
+            } catch {
+                testState = .failed(error.localizedDescription)
             }
         }
     }

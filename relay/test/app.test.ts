@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PushResult, PushSender } from "../src/apns";
-import { CALLS_PER_DAY, createApp, MAX_TEXT, NEW_ACCOUNTS_PER_IP_HOUR } from "../src/app";
+import { CALLS_PER_DAY, createApp, MAX_TEXT, NEW_ACCOUNTS_PER_IP_HOUR, SETUP_LINK_TTL_MS } from "../src/app";
 import { type Call, type Device, normalizeKey, RING_TIMEOUT_MS, Store } from "../src/db";
 
 const ORIGIN = "https://relay.test";
@@ -198,6 +198,56 @@ describe("website", () => {
     expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
     expect(store.accountIdByKey(accountKey)).toBeNull();
     expect((await web("/v1/bots", { method: "GET", cookie, origin: null })).status).toBe(401);
+  });
+});
+
+describe("setup links", () => {
+  const newLink = async (token = devToken) => {
+    const res = await req("/v1/setup-link", token, { method: "POST" });
+    return { res, url: res.ok ? new URL(((await res.json()) as { url: string }).url) : null };
+  };
+  const open = (path: string, origin: string | null = ORIGIN) =>
+    req(path, null, { method: "POST", headers: origin ? { origin } : {} });
+
+  test("only a phone can make one", async () => {
+    expect((await newLink(botToken)).res.status).toBe(403);
+    const login = await req("/web/login", null, { body: { key: accountKey }, headers: { origin: ORIGIN } });
+    const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+    expect((await req("/v1/setup-link", null, { method: "POST", headers: { cookie, origin: ORIGIN } })).status).toBe(403);
+    const { res, url } = await newLink();
+    expect(res.status).toBe(201);
+    expect(url!.origin).toBe(ORIGIN);
+    expect(url!.pathname).toStartWith("/s/");
+  });
+  test("opening the link only shows a button, so link previews do not use it up", async () => {
+    const { url } = await newLink();
+    const page = await req(url!.pathname, null);
+    expect(page.status).toBe(200);
+    expect(page.headers.get("set-cookie")).toBeNull();
+    expect(await page.text()).toContain("Continue");
+    expect((await open(url!.pathname)).status).toBe(303);
+  });
+  test("the button signs the browser in once and opens the connect steps", async () => {
+    const { url } = await newLink();
+    expect((await open(url!.pathname, null)).status).toBe(403);
+    expect((await open(url!.pathname, "https://evil.test")).status).toBe(403);
+    const res = await open(`${url!.pathname}?client=claude`);
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/config?client=claude#connect");
+    const cookie = res.headers.get("set-cookie")!.split(";")[0]!;
+    const status = (await (await req("/v1/status", null, { headers: { cookie } })).json()) as { account_id: string };
+    expect(status.account_id).toBe(accountId);
+    expect((await open(url!.pathname)).status).toBe(410);
+  });
+  test("unknown clients are dropped from the redirect", async () => {
+    const { url } = await newLink();
+    expect((await open(`${url!.pathname}?client=https://evil.test`)).headers.get("location")).toBe("/config#connect");
+  });
+  test("links expire", async () => {
+    const { url } = await newLink();
+    clock += SETUP_LINK_TTL_MS + 1;
+    expect((await open(url!.pathname)).status).toBe(410);
+    expect((await open("/s/AAAAAAAAAAAAAAAAAAAAAAAA")).status).toBe(410);
   });
 });
 

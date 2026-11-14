@@ -95,6 +95,22 @@ struct API {
         return try JSONDecoder().decode(NewAgent.self, from: await send(request("v1/bots", method: "POST", body: Body(name: name)))).token
     }
 
+    /// A one-time link that signs a computer's browser in to this account and opens the setup steps.
+    func setupLink(client: String?) async throws -> URL {
+        struct Reply: Decodable { let url: String }
+        let reply = try JSONDecoder().decode(Reply.self, from: await send(request("v1/setup-link", method: "POST")))
+        guard var components = URLComponents(string: reply.url) else { throw APIError.message("The server returned a broken link") }
+        if let client { components.queryItems = [URLQueryItem(name: "client", value: client)] }
+        guard let url = components.url else { throw APIError.message("The server returned a broken link") }
+        return url
+    }
+
+    /// Rings this account's phones from the built-in test agent.
+    func testCall(text: String) async throws {
+        struct Body: Encodable { let text: String }
+        _ = try await send(request("v1/test-call", method: "POST", body: Body(text: text)))
+    }
+
     func deleteAgent(id: String) async throws {
         _ = try await send(request("v1/bots/\(id)", method: "DELETE"))
     }

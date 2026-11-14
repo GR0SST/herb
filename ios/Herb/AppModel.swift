@@ -28,7 +28,17 @@ final class AppModel {
     private let pushEnvironment = "production"
     #endif
 
+    /// Opens the connect steps once, right after a new account is made.
+    var showConnectGuide = false
+
     var api: API? { connection.map(API.init) }
+    var mcpURL: String {
+        status?.mcpURL ?? connection?.baseURL.appending(path: "mcp").absoluteString ?? ""
+    }
+    var agentClients: [AgentClient] {
+        let origin = connection?.baseURL.absoluteString ?? Self.defaultServer.absoluteString
+        return AgentClient.all(mcpURL: mcpURL, origin: origin)
+    }
     var accountKey: String? { connection.flatMap { ConnectionStore.accountKey(for: $0.baseURL) } }
 
     /// Push works on its own. Mention it only when a call would not reach a closed app.
@@ -76,6 +86,7 @@ final class AppModel {
     func createAccount() async throws {
         let created = try await API.createAccount(at: signInServer, deviceName: deviceName)
         try await finishSignIn(token: created.token, key: created.key)
+        showConnectGuide = true
     }
 
     func signIn(key: String) async throws {

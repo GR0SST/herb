@@ -56,6 +56,7 @@ async function api(path, options = {}) {
 
 const clients = (url) => [
   {
+    id: "chatgpt",
     name: "ChatGPT",
     steps: [
       ['Open <a href="https://chatgpt.com/plugins" rel="noopener">chatgpt.com/plugins</a>. Custom servers may require Developer mode in Settings.'],
@@ -64,6 +65,7 @@ const clients = (url) => [
     ],
   },
   {
+    id: "claude",
     name: "Claude",
     steps: [
       ['Open <a href="https://claude.ai/customize/connectors" rel="noopener">claude.ai connectors</a>.'],
@@ -72,6 +74,7 @@ const clients = (url) => [
     ],
   },
   {
+    id: "grok",
     name: "Grok Bot",
     steps: [
       ["In a Grok Bot chat, send:", `Add a custom MCP server called herb at ${url}`],
@@ -79,14 +82,17 @@ const clients = (url) => [
     ],
   },
   {
+    id: "codex",
     name: "Codex",
     steps: [["Run:", `codex mcp add herb --url ${url}`], ["Sign in on the Herb page that opens and confirm."]],
   },
   {
+    id: "claude-code",
     name: "Claude Code",
     steps: [["Run:", `claude mcp add --transport http herb ${url}`], ["Run /mcp in Claude Code, sign in on the Herb page and confirm."]],
   },
   {
+    id: "script",
     name: "Script",
     steps: [["Create an API token below, then:", `curl -X POST ${new URL(url).origin}/v1/call -H "Authorization: Bearer $TOKEN"`]],
   },
@@ -122,7 +128,9 @@ function renderClients(url) {
     tab.addEventListener("click", () => select(index));
     tabs.append(tab);
   });
-  select(0);
+  // A setup link from the phone names the agent app to show first.
+  const wanted = new URLSearchParams(location.search).get("client");
+  select(Math.max(0, list.findIndex((client) => client.id === wanted)));
 }
 
 function row(mainText, subText, action) {
@@ -213,7 +221,9 @@ function show(onConfig) {
   $("dashboard").hidden = !onConfig;
   document.title = onConfig ? "Configure | Herb" : LANDING_TITLE;
   renderNav(onConfig);
-  if (!location.hash) window.scrollTo(0, 0);
+  const target = location.hash && document.getElementById(location.hash.slice(1));
+  if (target && !target.hidden) target.scrollIntoView();
+  else window.scrollTo(0, 0);
 }
 
 function navigate(path) {

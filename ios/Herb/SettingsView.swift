@@ -12,6 +12,8 @@ struct SettingsView: View {
     @State private var copied = false
     @State private var error: String?
     @AppStorage(CallCenter.autoHangUpKey) private var autoHangUp = true
+    @State private var showingTour = false
+    @State private var connecting = false
 
     var body: some View {
         NavigationStack {
@@ -30,6 +32,14 @@ struct SettingsView: View {
                     Text("Calls")
                 } footer: {
                     Text("When off, a call stays open after the message until you hang up.")
+                }
+                Section("Help") {
+                    Button("Connect an Agent", systemImage: "plus.circle") { connecting = true }
+                    SetUpOnComputerButton(client: nil)
+                    Button("How Herb Works", systemImage: "questionmark.circle") { showingTour = true }
+                    if let docs = model.connection?.baseURL.appending(path: "docs") {
+                        Link(destination: docs) { Label("Documentation", systemImage: "book") }
+                    }
                 }
                 Section {
                     LabeledContent("Server", value: model.connection?.baseURL.host() ?? "—")
@@ -71,6 +81,10 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: $connecting) { ConnectAgentView() }
+            .fullScreenCover(isPresented: $showingTour) {
+                OnboardingView(replay: true) { showingTour = false }
+            }
             .refreshable { await model.refresh() }
             .confirmationDialog("Sign out on this phone?", isPresented: $confirmSignOut, titleVisibility: .visible) {
                 Button("Sign Out") { run { try await model.signOut() } }

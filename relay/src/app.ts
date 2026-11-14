@@ -7,7 +7,7 @@ import { clientIp, WindowLimiter } from "./limits";
 import { BillingError, createBilling } from "./billing";
 import { createLive, LIVE_LIMITS, type Direction, type LiveAction, type Listener, type VoiceEngine, webhookUrlError } from "./live";
 import { handleMcp, type McpActions } from "./mcp";
-import type { OAuth } from "./oauth";
+import { escapeHtml, type OAuth, page } from "./oauth";
 import { notFoundPage, serveSite } from "./site";
 import { normalizeLanguage } from "./speech";
 
@@ -27,6 +27,8 @@ const DAY_MS = 24 * HOUR_MS;
 const MAX_CHAT_MESSAGES = 100;
 const MAX_CHAT_CHARS = 200_000;
 const MAX_NAME = 40;
+export const SETUP_LINK_TTL_MS = 15 * 60 * 1000;
+const SETUP_CLIENTS = new Set(["chatgpt", "claude", "grok", "codex", "claude-code", "script"]);
 const AUDIO_MIMES = new Set(["audio/mpeg", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/wav", "audio/x-wav"]);
 const DEVICE_STATUSES: readonly CallStatus[] = ["answered", "played", "declined", "missed", "failed"];
 const LIVE_ACTIONS = new Set(["answer", "say", "context", "hangup"]);
@@ -529,6 +531,12 @@ export function createApp(options: AppOptions) {
         live: { available: liveFor(accountId), ...billing.plan(accountId) },
       });
     }
+    if (resource === "setup-link" && !id && method === "POST") {
+      if (!device) return err(403, "forbidden", "Only for phones");
+      if (!options.publicUrl) return err(503, "unavailable", "This server has no public address");
+      const code = store.createSetupLink(accountId, now(), SETUP_LINK_TTL_MS);
+      return Response.json({ url: `${options.publicUrl}/s/${code}`, expires_at: now() + SETUP_LINK_TTL_MS }, { status: 201 });
+    }
     if (resource === "billing" && id === "transactions" && method === "POST") {
       if (!device) return err(403, "forbidden", "Only for phones");
       const body = await readJson<{ jws?: unknown }>(request);
@@ -640,6 +648,33 @@ export function createApp(options: AppOptions) {
     return err(404, "not_found", "Not found");
   }
 
+  /**
+   * A setup link from the phone. Opening it shows a button, and only the button signs the browser in,
+   * because link previews in chats open the address too and would use up the link.
+   */
+  async function setupLink(request: Request, url: URL) {
+    const code = url.pathname.slice("/s/".length);
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(code)) return null;
+    const client = url.searchParams.get("client") ?? "";
+    const target = `/config${SETUP_CLIENTS.has(client) ? `?client=${client}` : ""}#connect`;
+    const expired = () =>
+      page("Link expired", "<h1>This link has expired</h1><p>Setup links work once, for 15 minutes. In the Herb app, open Connect Agent and tap Set Up on a Computer again.</p>", 410);
+    if (request.method === "GET" || request.method === "HEAD") {
+      return page("Set up Herb", `<h1>Set up Herb</h1>
+<p>This signs this browser in to the Herb account from your iPhone, then shows how to connect your agents.</p>
+<form method="post" action="${escapeHtml(url.pathname + url.search)}"><button type="submit">Continue</button></form>
+<p class="row">Not your link? Close this page.</p>`);
+    }
+    if (request.method !== "POST") return null;
+    if (request.headers.get("origin") !== origin) return page("Request refused", "<h1>Request refused</h1><p>Open the link again.</p>", 403);
+    const accountId = store.takeSetupLink(code, now());
+    if (!accountId) return expired();
+    return new Response(null, {
+      status: 303,
+      headers: { location: target, "cache-control": "no-store", "set-cookie": sessionCookie(store.createSession(accountId, now())) },
+    });
+  }
+
   /** On /mcp this header tells the client where OAuth sign-in starts. */
   function unauthorized(url: URL, message: string) {
     const response = err(401, "unauthorized", message);
@@ -651,8 +686,12 @@ export function createApp(options: AppOptions) {
     const url = new URL(request.url);
     if (url.pathname === "/health") return Response.json({ ok: true });
     if (request.method === "GET" || request.method === "HEAD") {
-      const page = serveSite(url.pathname);
-      if (page) return page;
+      const site = serveSite(url.pathname);
+      if (site) return site;
+    }
+    if (url.pathname.startsWith("/s/")) {
+      const response = await setupLink(request, url);
+      if (response) return response;
     }
 
     const length = Number(request.headers.get("content-length") ?? 0);
